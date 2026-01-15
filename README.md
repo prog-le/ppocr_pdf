@@ -39,8 +39,8 @@
 1. **克隆项目**
 
    ```bash
-   git clone https://github.com/your-username/paddleocr-pdf.git
-   cd paddleocr-pdf
+   git clone https://github.com/prog-le/ppocr_pdf.git
+   cd ppocr_pdf
    ```
 2. **创建虚拟环境**（可选但推荐）
 
@@ -332,8 +332,8 @@ OCR识别速度受多种因素影响，包括PDF文件大小、页数、图像�
 
 如果您有任何问题或建议，可以通过以下方式联系我们：
 
-- 项目地址：https://github.com/your-username/paddleocr-pdf
-- 电子邮件：your-email@example.com
+- 项目地址：https://github.com/prog-le/ppocr_pdf
+- 电子邮件：prog.le@outlook.com
 
 ## 更新日志
 
