@@ -1,0 +1,6 @@
+paddleocr
+paddlepaddle
+opencv-python
+pypdfium2
+watchdog
+python-dotenv
