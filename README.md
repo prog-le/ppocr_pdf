@@ -40,7 +40,7 @@
 
    ```bash
    git clone https://github.com/prog-le/ppocr_pdf.git
-   cd paddleocr-pdf
+   cd ppocr_pdf
    ```
 2. **创建虚拟环境**（可选但推荐）
 
@@ -68,6 +68,7 @@
    # 安装PaddleOCR
    pip install paddleocr
    ```
+
 5. **安装额外依赖（可选，用于PP-StructureV3）**
 
    ```bash
@@ -103,7 +104,6 @@ python ocr_pdf.py [-h] -i INPUT -o OUTPUT [-m {manual,daemon}] [-model {paddleoc
 | pp-chatocrv4   | 智能信息抽取 | 原生集成ERNIE 4.5，从海量文档中精准提取关键信息，精度提升15个百分点       | 信息抽取、文档问答、关键信息提取             | ⚠️ 需API密钥，暂不直接支持 |
 
 **注意：**
-
 - pp-structurev3模型需要安装额外依赖：`pip install "paddlex[ocr]"`
 - pp-chatocrv4模型需要配置百度千帆API密钥，目前暂不直接支持在本程序中使用
 
@@ -166,6 +166,27 @@ More test content here.
 
 - **控制台日志**：实时输出处理过程信息
 - **Markdown日志**：将识别结果以表格形式记录到项目根目录下的 `ocr_logs.md` 文件
+
+#### Markdown日志格式
+
+```markdown
+# OCR识别日志
+
+| 日期时间 | 文件名 | 文件大小 | 总页数 | 处理耗时 | 处理结果 | 输出路径 |
+|---------|------|---------|-------|---------|---------|---------|
+| 2026-01-15 10:30:25 | test.pdf | 0.00MB | 2 | 8.23秒 | 成功 | ./test_output/test.txt |
+| 2026-01-15 10:30:35 | document.pdf | 1.50MB | 5 | 15.42秒 | 成功 | ./test_output/document.txt |
+```
+
+#### 日志内容说明
+
+- **日期时间**：OCR识别完成的时间
+- **文件名**：被处理的PDF文件名
+- **文件大小**：PDF文件的大小
+- **总页数**：PDF文件的总页数
+- **处理耗时**：完成整个PDF文件识别所用的时间
+- **处理结果**：识别是否成功
+- **输出路径**：识别结果保存的文件路径
 
 ### API服务
 
@@ -256,7 +277,7 @@ class PDFOCRHandler:
     def __init__(self, output_dir, model='pp-ocrv5'):
         self.output_dir = output_dir
         self.model = model
-    
+        
         # 根据选择的模型配置不同参数
         if model == 'paddleocr-vl':
             self.ocr = PaddleOCR(

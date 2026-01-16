@@ -4,8 +4,6 @@
 # 忽略测试输出目录
 test_output/
 
-# 忽略.paddlex目录
-.paddlex/
 
 # 忽略日志文件
 ocr_logs.md
