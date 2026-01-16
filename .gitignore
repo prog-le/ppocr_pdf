@@ -1,7 +1,8 @@
 # 忽略模型文件和缓存目录
 .paddlex/
 
-# 忽略测试输出目录
+# 忽略测试输入输出目录
+test_input/
 test_output/
 
 
