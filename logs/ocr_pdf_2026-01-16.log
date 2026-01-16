@@ -50,26 +50,3 @@
 2026-01-16 07:56:25,047 - ocr_pdf - INFO - 输出路径: /var/folders/xl/67d5yjrd5ns69tr_3cpz733m0000gn/T/tmpx7qn76_h/output/test.txt
 2026-01-16 07:56:25,047 - ocr_pdf - INFO - ==================================================
 2026-01-16 07:56:25,049 - ocr_pdf - INFO - 日志已记录到Markdown文件: /Users/prog.le/Documents/codes/paddleocr/ocr_logs.md
-2026-01-16 07:59:39,481 - api - INFO - 初始化OCR处理器，使用模型: pp-ocrv5
-2026-01-16 07:59:39,481 - ocr_pdf - INFO - 正在初始化pp-ocrv5模型...
-2026-01-16 07:59:40,268 - ocr_pdf - INFO - pp-ocrv5模型初始化完成
-2026-01-16 07:59:40,268 - ocr_pdf - INFO - 使用OCR模型: pp-ocrv5
-2026-01-16 07:59:40,268 - api - INFO - 开始处理PDF文件: 专到互数据接口自查整治自查表.pdf
-2026-01-16 07:59:40,268 - ocr_pdf - INFO - 开始处理PDF文件: /var/folders/xl/67d5yjrd5ns69tr_3cpz733m0000gn/T/tmpwg7kx65q/专到互数据接口自查整治自查表.pdf
-2026-01-16 07:59:40,268 - ocr_pdf - INFO - 文件信息: 文件名=专到互数据接口自查整治自查表.pdf, 大小=0.21MB
-2026-01-16 07:59:40,270 - ocr_pdf - INFO - PDF文件总页数: 1
-2026-01-16 07:59:40,270 - ocr_pdf - INFO - 处理第 1/1 页
-2026-01-16 07:59:40,292 - ocr_pdf - INFO - 开始识别第 1 页内容...
-2026-01-16 07:59:58,533 - ocr_pdf - INFO - 第 1 页识别完成，耗时: 18.24秒
-2026-01-16 07:59:58,777 - ocr_pdf - INFO - PDF文件处理完成，结果保存至: /var/folders/xl/67d5yjrd5ns69tr_3cpz733m0000gn/T/tmpwg7kx65q/output/专到互数据接口自查整治自查表.txt
-2026-01-16 07:59:58,777 - ocr_pdf - INFO - ==================================================
-2026-01-16 07:59:58,777 - ocr_pdf - INFO - OCR识别完成日志
-2026-01-16 07:59:58,777 - ocr_pdf - INFO - 日期时间: 2026-01-16 07:59:58
-2026-01-16 07:59:58,777 - ocr_pdf - INFO - 文件名: 专到互数据接口自查整治自查表.pdf
-2026-01-16 07:59:58,777 - ocr_pdf - INFO - 文件大小: 0.21MB
-2026-01-16 07:59:58,777 - ocr_pdf - INFO - 总页数: 1
-2026-01-16 07:59:58,777 - ocr_pdf - INFO - 处理耗时: 18.51秒
-2026-01-16 07:59:58,777 - ocr_pdf - INFO - 处理结果: 成功
-2026-01-16 07:59:58,777 - ocr_pdf - INFO - 输出路径: /var/folders/xl/67d5yjrd5ns69tr_3cpz733m0000gn/T/tmpwg7kx65q/output/专到互数据接口自查整治自查表.txt
-2026-01-16 07:59:58,777 - ocr_pdf - INFO - ==================================================
-2026-01-16 07:59:58,778 - ocr_pdf - INFO - 日志已记录到Markdown文件: /Users/prog.le/Documents/codes/paddleocr/ocr_logs.md
