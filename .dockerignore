@@ -1,0 +1,36 @@
+# Git相关文件
+.git
+.gitignore
+
+# 测试文件和目录
+test_input/
+test_output/
+__pycache__/
+*.pyc
+*.pyo
+
+# 临时文件和目录
+*.tmp
+*.temp
+.trae/
+.DS_Store
+
+# 开发环境配置
+*.env
+.env.*
+!.env.example
+
+# 日志文件
+logs/
+*.log
+ocr_logs.md
+
+# 模型和缓存
+.paddlex/
+
+# 其他非必要文件
+LICENSE
+README.md
+*.tex
+*.txt
+!requirements.txt

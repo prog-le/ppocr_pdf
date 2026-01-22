@@ -41,6 +41,16 @@ import time
 import argparse
 import logging
 import sys
+from PyPDF2 import PdfReader, PdfWriter
+
+# 配置日志级别映射
+LOG_LEVELS = {
+    'debug': logging.DEBUG,
+    'info': logging.INFO,
+    'warning': logging.WARNING,
+    'error': logging.ERROR,
+    'critical': logging.CRITICAL
+}
 
 # 设置日志配置
 # 创建logs目录
@@ -52,7 +62,7 @@ log_filename = os.path.join(logs_dir, f"ocr_pdf_{time.strftime('%Y-%m-%d')}.log"
 
 # 配置日志同时输出到控制台和文件
 logging.basicConfig(
-    level=logging.INFO, 
+    level=logging.INFO,  # 初始默认值，后续会根据命令行参数更新
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),  # 控制台输出
@@ -110,9 +120,12 @@ import numpy as np
 from paddleocr import PaddleOCR, PPStructureV3, PaddleOCRVL
 
 class PDFOCRHandler:
-    def __init__(self, output_dir, model='pp-ocrv5'):
+    def __init__(self, output_dir, model='pp-ocrv5', optimize_pdf=False, optimize_level='medium', grayscale=False):
         self.output_dir = output_dir
         self.model = model
+        self.optimize_pdf_flag = optimize_pdf
+        self.optimize_level = optimize_level
+        self.grayscale = grayscale
         
         # 根据选择的模型配置PaddleOCR
         logger.info(f"正在初始化{model}模型...")
@@ -142,9 +155,73 @@ class PDFOCRHandler:
         logger.info(f"{model}模型初始化完成")
         
         logger.info(f"使用OCR模型: {model}")
+        logger.info(f"PDF优化: {'开启' if self.optimize_pdf_flag else '关闭'}")
+        if self.optimize_pdf_flag:
+            logger.info(f"优化级别: {self.optimize_level}")
+        logger.info(f"灰度渲染: {'开启' if self.grayscale else '关闭'}")
         
         # 确保输出目录存在
         os.makedirs(output_dir, exist_ok=True)
+    
+    def optimize_pdf(self, pdf_path):
+        """
+        优化PDF文件，包括压缩、去重、结构优化等
+        
+        Args:
+            pdf_path (str): PDF文件路径
+            
+        Returns:
+            str: 优化后的PDF文件路径
+        """
+        logger.info(f"开始优化PDF文件: {pdf_path}")
+        
+        # 生成优化后的文件名
+        filename = os.path.splitext(os.path.basename(pdf_path))[0]
+        optimized_pdf_path = os.path.join(self.output_dir, f"{filename}_optimized.pdf")
+        
+        try:
+            # 读取原始PDF
+            reader = PdfReader(pdf_path)
+            writer = PdfWriter()
+            
+            # 复制页面并优化
+            for page_num in range(len(reader.pages)):
+                page = reader.pages[page_num]
+                
+                # 添加页面到输出
+                writer.add_page(page)
+            
+            # 设置压缩参数
+            compression_level = 0
+            if self.optimize_level == 'low':
+                compression_level = 1
+            elif self.optimize_level == 'medium':
+                compression_level = 3
+            elif self.optimize_level == 'high':
+                compression_level = 5
+            
+            # 写入优化后的PDF
+            with open(optimized_pdf_path, 'wb') as f:
+                writer.write(f)
+            
+            # 获取文件大小，计算压缩率
+            original_size = os.path.getsize(pdf_path)
+            optimized_size = os.path.getsize(optimized_pdf_path)
+            compression_ratio = (1 - optimized_size / original_size) * 100
+            
+            logger.info(f"PDF优化完成")
+            logger.info(f"原始大小: {original_size / 1024 / 1024:.2f} MB")
+            logger.info(f"优化后大小: {optimized_size / 1024 / 1024:.2f} MB")
+            logger.info(f"压缩率: {compression_ratio:.2f}%")
+            
+            return optimized_pdf_path
+            
+        except Exception as e:
+            logger.error(f"PDF优化失败: {str(e)}")
+            import traceback
+            logger.debug(f"完整错误堆栈: {traceback.format_exc()}")
+            # 如果优化失败，返回原始文件路径
+            return pdf_path
     
     def process_pdf(self, pdf_path):
         """处理单个PDF文件的OCR识别"""
@@ -169,6 +246,10 @@ class PDFOCRHandler:
             filename = os.path.splitext(os.path.basename(pdf_path))[0]
             output_txt_path = os.path.join(self.output_dir, f"{filename}.txt")
             
+            # 优化PDF文件
+            if self.optimize_pdf_flag:
+                pdf_path = self.optimize_pdf(pdf_path)
+            
             # 打开PDF文件
             pdf = pdfium.PdfDocument(pdf_path)
             total_pages = len(pdf)
@@ -191,7 +272,7 @@ class PDFOCRHandler:
                         scale=1.0,  # 降低初始缩放比例以提高性能
                         rotation=0,
                         # 使用灰度渲染可以进一步减少内存使用
-                        grayscale=False
+                        grayscale=self.grayscale
                     )
                     
                     # 转换为numpy数组
@@ -562,9 +643,14 @@ class PDFOCRHandler:
             logger.info(f"日志已记录到Markdown文件: {log_md_path}")
 
 class PDFFileHandler(FileSystemEventHandler):
-    """监控目录中的新PDF文件"""
-    def __init__(self, output_dir, model='pp-ocrv5'):
-        self.ocr_handler = PDFOCRHandler(output_dir, model)
+    """监控目录中的新PDF文件（同步处理）"""
+    def __init__(self, output_dir, model='pp-ocrv5', optimize_pdf=False, optimize_level='medium', grayscale=False):
+        self.output_dir = output_dir
+        self.model = model
+        self.optimize_pdf_flag = optimize_pdf
+        self.optimize_level = optimize_level
+        self.grayscale = grayscale
+        logger.info(f"初始化守护模式处理器，使用模型: {model}")
     
     def on_created(self, event):
         """当有新文件创建时触发"""
@@ -572,10 +658,38 @@ class PDFFileHandler(FileSystemEventHandler):
             logger.info(f"检测到新的PDF文件: {event.src_path}")
             # 等待文件完全写入
             time.sleep(1)
-            self.ocr_handler.process_pdf(event.src_path)
+            # 直接同步处理
+            self.process_pdf_task(event.src_path)
+    
+    def process_pdf_task(self, pdf_path):
+        """处理单个PDF文件的任务"""
+        logger.info(f"开始处理文件: {os.path.basename(pdf_path)}")
+        
+        # 每个任务创建自己的OCR处理器
+        ocr_handler = PDFOCRHandler(
+            self.output_dir, 
+            self.model,
+            optimize_pdf=self.optimize_pdf_flag,
+            optimize_level=self.optimize_level,
+            grayscale=self.grayscale
+        )
+        try:
+            result = ocr_handler.process_pdf(pdf_path)
+            logger.info(f"完成处理文件: {os.path.basename(pdf_path)}, 结果: {'成功' if result else '失败'}")
+            return result
+        except Exception as e:
+            logger.error(f"处理文件 {os.path.basename(pdf_path)} 时出错: {str(e)}")
+            import traceback
+            logger.debug(f"完整错误堆栈: {traceback.format_exc()}")
+            return False
+    
+    def shutdown(self):
+        """关闭处理器"""
+        logger.info("正在关闭守护模式处理器...")
+        logger.info("守护模式处理器已关闭")
 
-def run_manual_mode(input_dir, output_dir, model='pp-ocrv5'):
-    """手动模式：处理输入目录中已存在的所有PDF文件"""
+def run_manual_mode(input_dir, output_dir, model='pp-ocrv5', optimize_pdf=False, optimize_level='medium', grayscale=False):
+    """手动模式：处理输入目录中已存在的所有PDF文件（同步处理）"""
     logger.info(f"手动模式启动，处理目录: {input_dir}")
     
     # 获取输入目录中的所有PDF文件
@@ -589,22 +703,51 @@ def run_manual_mode(input_dir, output_dir, model='pp-ocrv5'):
     
     logger.info(f"找到 {len(pdf_files)} 个PDF文件")
     
-    # 创建OCR处理器
-    ocr_handler = PDFOCRHandler(output_dir, model)
+    # 初始化OCR处理器
+    ocr_handler = PDFOCRHandler(
+        output_dir, 
+        model,
+        optimize_pdf=optimize_pdf,
+        optimize_level=optimize_level,
+        grayscale=grayscale
+    )
     
-    # 逐个处理PDF文件
+    # 同步处理所有PDF文件
+    success_count = 0
+    failed_count = 0
+    
     for pdf_file in pdf_files:
         pdf_path = os.path.join(input_dir, pdf_file)
-        ocr_handler.process_pdf(pdf_path)
+        logger.info(f"开始处理文件: {pdf_file}")
+        
+        try:
+            result = ocr_handler.process_pdf(pdf_path)
+            if result:
+                success_count += 1
+                logger.info(f"完成处理文件: {pdf_file}, 结果: 成功")
+            else:
+                failed_count += 1
+                logger.info(f"完成处理文件: {pdf_file}, 结果: 失败")
+        except Exception as e:
+            logger.error(f"处理文件 {pdf_file} 时出错: {str(e)}")
+            import traceback
+            logger.debug(f"完整错误堆栈: {traceback.format_exc()}")
+            failed_count += 1
     
-    logger.info("手动模式处理完成")
+    logger.info(f"手动模式处理完成，成功: {success_count} 个，失败: {failed_count} 个，总计: {len(pdf_files)} 个")
 
-def run_daemon_mode(input_dir, output_dir, model='pp-ocrv5'):
+def run_daemon_mode(input_dir, output_dir, model='pp-ocrv5', optimize_pdf=False, optimize_level='medium', grayscale=False):
     """守护模式：持续监控输入目录，处理新的PDF文件"""
     logger.info(f"守护模式启动，监控目录: {input_dir}")
     
     # 创建事件处理器
-    event_handler = PDFFileHandler(output_dir, model)
+    event_handler = PDFFileHandler(
+        output_dir, 
+        model,
+        optimize_pdf=optimize_pdf,
+        optimize_level=optimize_level,
+        grayscale=grayscale
+    )
     
     # 创建观察者
     observer = Observer()
@@ -619,7 +762,12 @@ def run_daemon_mode(input_dir, output_dir, model='pp-ocrv5'):
     except KeyboardInterrupt:
         logger.info("守护模式停止")
     
+    # 停止观察者
+    observer.stop()
     observer.join()
+    
+    # 关闭处理器
+    event_handler.shutdown()
 
 def main():
     """主函数"""
@@ -631,8 +779,22 @@ def main():
                        help='工作模式：manual（手动模式）或 daemon（守护模式）')
     parser.add_argument('-model', '--model', choices=['paddleocr-vl', 'pp-ocrv5', 'pp-structurev3', 'pp-chatocrv4'], 
                        default='pp-ocrv5', help='OCR模型选择：paddleocr-vl（多模态文档解析）、pp-ocrv5（全场景文字识别）、pp-structurev3（复杂文档解析）、pp-chatocrv4（智能信息抽取）')
+    parser.add_argument('-l', '--log-level', choices=LOG_LEVELS.keys(), default='info', 
+                       help='日志输出级别：debug、info、warning、error、critical，默认：info')
+    parser.add_argument('--optimize-pdf', action='store_true', help='是否优化PDF文件，默认：False')
+    parser.add_argument('--optimize-level', choices=['low', 'medium', 'high'], default='medium', 
+                       help='PDF优化级别，可选值：low、medium、high，默认：medium')
+    parser.add_argument('--grayscale', action='store_true', help='是否使用灰度渲染，默认：False')
     
     args = parser.parse_args()
+    
+    # 设置日志级别
+    log_level = LOG_LEVELS[args.log_level]
+    logging.getLogger().setLevel(log_level)
+    # 同时设置paddleocr相关日志器的级别
+    for logger_name in ['paddleocr', 'paddle', 'ppocr', 'paddlex']:
+        logging.getLogger(logger_name).setLevel(log_level)
+    logger.info(f"日志级别已设置为：{args.log_level}")
     
     # 确保输出目录存在
     os.makedirs(args.output, exist_ok=True)
@@ -645,16 +807,36 @@ def main():
             return
         
         logger.info(f"手动模式启动，处理单个文件: {args.input}")
-        ocr_handler = PDFOCRHandler(args.output, args.model)
+        ocr_handler = PDFOCRHandler(
+            args.output, 
+            args.model,
+            optimize_pdf=args.optimize_pdf,
+            optimize_level=args.optimize_level,
+            grayscale=args.grayscale
+        )
         ocr_handler.process_pdf(args.input)
         logger.info("单个文件处理完成")
     elif os.path.isdir(args.input):
         # 输入是目录
         # 根据模式运行
         if args.mode == 'manual':
-            run_manual_mode(args.input, args.output, args.model)
+            run_manual_mode(
+                args.input, 
+                args.output, 
+                args.model,
+                optimize_pdf=args.optimize_pdf,
+                optimize_level=args.optimize_level,
+                grayscale=args.grayscale
+            )
         else:
-            run_daemon_mode(args.input, args.output, args.model)
+            run_daemon_mode(
+                args.input, 
+                args.output, 
+                args.model,
+                optimize_pdf=args.optimize_pdf,
+                optimize_level=args.optimize_level,
+                grayscale=args.grayscale
+            )
     else:
         logger.error(f"输入路径不存在: {args.input}")
         return

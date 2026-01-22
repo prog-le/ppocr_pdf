@@ -33,9 +33,18 @@ import argparse
 import logging
 import sys
 
+# 配置日志级别映射
+LOG_LEVELS = {
+    'debug': logging.DEBUG,
+    'info': logging.INFO,
+    'warning': logging.WARNING,
+    'error': logging.ERROR,
+    'critical': logging.CRITICAL
+}
+
 # 配置日志
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.INFO,  # 初始默认值，后续会根据命令行参数更新
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler()]
 )
@@ -115,6 +124,13 @@ def download_model(model_name):
             )
         elif model_name == 'pp-structurev3':
             # 下载PP-StructureV3模型
+            # 检查pp-structurev3所需的依赖
+            try:
+                import paddlex
+            except ImportError:
+                logger.error(f"下载 {model_name} 模型需要安装额外依赖: 'pip install \"paddlex[ocr]\"'")
+                return False
+            
             ocr = PPStructureV3(
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False
@@ -152,8 +168,23 @@ def main():
         default=None,
         help='模型保存目录，默认使用PaddleOCR默认缓存目录'
     )
+    parser.add_argument(
+        '-l', '--log-level',
+        type=str,
+        choices=LOG_LEVELS.keys(),
+        default='info',
+        help=f"日志输出级别，可选值: {', '.join(LOG_LEVELS.keys())}，默认: info"
+    )
     
     args = parser.parse_args()
+    
+    # 设置日志级别
+    log_level = LOG_LEVELS[args.log_level]
+    logging.getLogger().setLevel(log_level)
+    # 同时设置paddleocr相关日志器的级别
+    for logger_name in ['paddleocr', 'paddle', 'ppocr', 'paddlex']:
+        logging.getLogger(logger_name).setLevel(log_level)
+    logger.info(f"日志级别已设置为：{args.log_level}")
     
     # 确定要下载的模型列表
     if args.models == 'all':

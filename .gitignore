@@ -2,8 +2,8 @@
 .paddlex/
 
 # 忽略测试输出目录
+test_input/
 test_output/
-
 
 # 忽略日志文件
 ocr_logs.md

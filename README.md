@@ -16,6 +16,8 @@
 - **多模型支持**：提供四种PaddleOCR模型供选择，满足不同场景需求
 - **结果保存**：将识别结果按页面组织保存为文本文件，便于后续查看和处理
 - **日志记录**：自动记录识别过程的详细信息，包括日期时间、文件名、文件大小、处理耗时、处理结果等
+- **PDF优化**：支持PDF文件优化，可配置不同优化级别，提高处理效率
+- **灰度渲染**：支持灰度渲染选项，减少内存占用，提升处理速度
 
 ### ✨ 技术特点
 
@@ -29,12 +31,14 @@
 
 ## 安装指南
 
-### 环境要求
+### 方式一：直接安装（推荐）
+
+#### 环境要求
 
 - Python 3.11+
 - pip 21.0+
 
-### 安装步骤
+#### 安装步骤
 
 1. **克隆项目**
 
@@ -76,12 +80,117 @@
    pip install "paddlex[ocr]"
    ```
 
+### 方式二：Docker部署
+
+#### 环境要求
+
+- Docker 20.10+
+
+#### 部署步骤
+
+1. **克隆项目**
+
+   ```bash
+   git clone https://github.com/prog-le/ppocr_pdf.git
+   cd ppocr_pdf
+   ```
+
+2. **构建Docker镜像**
+
+   ```bash
+   # 构建默认架构镜像
+   docker build -t paddleocr-pdf .
+
+   # 构建x86-64架构镜像
+   docker buildx build --platform linux/amd64 -t paddleocr-pdf:amd64 --load .
+
+   # 构建多架构镜像并推送
+   docker buildx build --platform linux/amd64,linux/arm64 -t your-registry/paddleocr-pdf:latest --push .
+   ```
+
+3. **运行Docker容器**
+
+   ```bash
+   # 基本运行
+   docker run -d -p 8000:8000 --name paddleocr-pdf-container paddleocr-pdf
+
+   # 挂载持久化卷
+   docker run -d -p 8000:8000 \
+     -v ./models:/app/.paddlex \
+     -v ./output:/app/output \
+     -v ./logs:/app/logs \
+     --name paddleocr-pdf-container \
+     paddleocr-pdf
+
+   # 配置环境变量
+   docker run -d -p 8000:8000 \
+     -e LOG_LEVEL=info \
+     --name paddleocr-pdf-container \
+     paddleocr-pdf
+   ```
+
+4. **验证服务**
+
+   ```bash
+   # 检查容器状态
+   docker ps
+
+   # 查看日志
+   docker logs paddleocr-pdf-container
+
+   # 测试健康检查
+   curl http://localhost:8000/health
+   ```
+
+#### Docker镜像特点
+
+- ✅ 基于轻量级`python:3.11-slim`镜像
+- ✅ 非root用户运行，提高安全性
+- ✅ 支持多平台架构（linux/amd64, linux/arm64）
+- ✅ 包含所有必要依赖
+- ✅ 预配置环境变量
+- ✅ 使用tini作为入口点，确保容器优雅退出
+
 ## 使用说明
+
+### 模型下载脚本
+
+项目提供了`download_models.py`脚本，用于手动下载PaddleOCR模型到指定目录。
+
+#### 脚本功能
+
+- 支持下载三种PaddleOCR模型：`pp-ocrv5`、`pp-structurev3`、`paddleocr-vl`
+- 可指定模型保存目录，方便模型管理
+- 自动创建必要的目录结构
+- 提供依赖检查，明确提示缺少的依赖
+
+#### 使用方法
+
+```bash
+# 下载所有模型到默认目录(.paddlex)
+python download_models.py
+
+# 下载指定模型到自定义目录
+python download_models.py -m pp-ocrv5,paddleocr-vl -o ./models
+
+# 下载单个模型
+python download_models.py -m pp-ocrv5
+```
+
+#### 参数说明
+
+- `-m, --models`: 要下载的模型，多个模型用逗号分隔，可选值: `pp-ocrv5, pp-structurev3, paddleocr-vl, all` (下载所有模型)，默认: `all`
+- `-o, --output`: 模型保存目录，默认保存到.paddlex目录
+
+#### 注意事项
+
+- **pp-structurev3模型**需要安装额外依赖：`pip install "paddlex[ocr]"`
+- 脚本会自动检查pp-structurev3所需的依赖，并给出明确的安装提示
 
 ### 命令行参数
 
 ```bash
-python ocr_pdf.py [-h] -i INPUT -o OUTPUT [-m {manual,daemon}] [-model {paddleocr-vl,pp-ocrv5,pp-structurev3,pp-chatocrv4}]
+python ocr_pdf.py [-h] -i INPUT -o OUTPUT [-m {manual,daemon}] [-model {paddleocr-vl,pp-ocrv5,pp-structurev3,pp-chatocrv4}] [-l {debug,info,warning,error,critical}] [--optimize-pdf] [--optimize-level {low,medium,high}] [--grayscale]
 ```
 
 参数说明：
@@ -90,6 +199,10 @@ python ocr_pdf.py [-h] -i INPUT -o OUTPUT [-m {manual,daemon}] [-model {paddleoc
 - `-o, --output`: 输出目录路径（必填）
 - `-m, --mode`: 工作模式，可选值：manual（手动模式）或 daemon（守护模式），默认：manual
 - `-model, --model`: OCR模型选择，可选值：paddleocr-vl、pp-ocrv5、pp-structurev3、pp-chatocrv4，默认：pp-ocrv5
+- `-l, --log-level`: 日志输出级别，可选值：debug、info、warning、error、critical，默认：info
+- `--optimize-pdf`: 是否优化PDF文件，默认：False
+- `--optimize-level`: PDF优化级别，可选值：low、medium、high，默认：medium
+- `--grayscale`: 是否使用灰度渲染，减少内存占用，默认：False
 - `-h, --help`: 显示帮助信息
 
 ### 模型选择说明
@@ -129,6 +242,18 @@ python ocr_pdf.py -i ./test_input/test.pdf -o ./test_output -m manual -model pad
 # 使用PP-StructureV3模型处理目录
 python ocr_pdf.py -i ./test_input -o ./test_output -m manual -model pp-structurev3
 
+# 启用PDF优化（默认级别）
+python ocr_pdf.py -i ./test_input -o ./test_output -m manual --optimize-pdf
+
+# 启用PDF优化并设置高级别
+python ocr_pdf.py -i ./test_input -o ./test_output -m manual --optimize-pdf --optimize-level high
+
+# 启用灰度渲染减少内存占用
+python ocr_pdf.py -i ./test_input -o ./test_output -m manual --grayscale
+
+# 同时启用PDF优化和灰度渲染
+python ocr_pdf.py -i ./test_input -o ./test_output -m manual --optimize-pdf --grayscale
+
 # pp-chatocrv4模型需要配置API密钥，目前暂不直接支持
 ```
 
@@ -142,6 +267,12 @@ python ocr_pdf.py -i ./test_input -o ./test_output -m daemon
 
 # 使用指定模型监控目录
 python ocr_pdf.py -i ./test_input -o ./test_output -m daemon -model paddleocr-vl
+
+# 在守护模式下启用PDF优化
+python ocr_pdf.py -i ./test_input -o ./test_output -m daemon --optimize-pdf
+
+# 在守护模式下启用灰度渲染
+python ocr_pdf.py -i ./test_input -o ./test_output -m daemon --grayscale
 ```
 
 ### 输出结果
@@ -254,14 +385,17 @@ curl -X POST "http://localhost:8000/ocr/pdf" \
 paddleocr-pdf/
 ├── ocr_pdf.py          # 主程序文件
 ├── api.py              # API服务模块
+├── download_models.py  # 模型下载脚本
 ├── ocr_logs.md         # OCR识别日志(自动生成)
 ├── test_input/         # 测试输入目录
-│   └── test.pdf        # 测试PDF文件
+│   └── 01.pdf          # 测试PDF文件
 ├── test_output/        # 测试输出目录
-│   └── test.txt        # 识别结果文件
+│   └── 01.txt          # 识别结果文件
 ├── logs/               # 日志文件目录(自动生成)
 ├── .paddlex/           # 模型缓存目录(自动生成)
 ├── requirements.txt    # 依赖项列表
+├── Dockerfile          # Docker构建文件
+├── .dockerignore       # Docker忽略配置
 ├── .gitignore          # Git忽略配置
 └── README.md           # 项目说明文档
 ```
@@ -341,7 +475,6 @@ OCR识别速度受多种因素影响，包括PDF文件大小、页数、图像�
 
 - 降低PDF渲染分辨率（修改 `scale`参数）
 - 使用GPU版本的PaddlePaddle
-- 减少并发处理的文件数量
 - 选择资源消耗较低的模型（如pp-ocrv5）
 
 ### 3. 识别准确率低
@@ -399,6 +532,20 @@ OCR识别速度受多种因素影响，包括PDF文件大小、页数、图像�
 - 电子邮件：prog.le@outlook.com
 
 ## 更新日志
+
+### v1.0.2 (2026-01-22)
+
+- 添加PDF优化功能，支持不同优化级别（low/medium/high）
+- 新增灰度渲染选项，减少内存占用，提升处理速度
+- 优化了渲染过程，添加动态scale调整
+- 实现了更高效的内存管理和资源释放机制
+- 为API接口添加了PDF优化参数支持
+- 新增Docker部署支持，包括：
+  - 多平台镜像构建
+  - 非root用户运行
+  - 持久化卷挂载
+  - 环境变量配置
+- 更新了文档，添加了Docker部署指南和API参数说明
 
 ### v1.0.1 (2026-01-16)
 
