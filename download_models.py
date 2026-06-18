@@ -33,6 +33,8 @@ import argparse
 import logging
 import sys
 
+from device_utils import check_cuda_environment, CUDA_TAG_MAP
+
 # 配置日志级别映射
 LOG_LEVELS = {
     'debug': logging.DEBUG,
@@ -120,7 +122,8 @@ def download_model(model_name):
             ocr = PaddleOCR(
                 use_textline_orientation=True,
                 use_doc_orientation_classify=False,
-                use_doc_unwarping=False
+                use_doc_unwarping=False,
+                device='cpu'
             )
         elif model_name == 'pp-structurev3':
             # 下载PP-StructureV3模型
@@ -133,13 +136,15 @@ def download_model(model_name):
             
             ocr = PPStructureV3(
                 use_doc_orientation_classify=False,
-                use_doc_unwarping=False
+                use_doc_unwarping=False,
+                device='cpu'
             )
         elif model_name == 'paddleocr-vl':
             # 下载PaddleOCR-VL模型
             ocr = PaddleOCRVL(
                 use_doc_orientation_classify=False,
-                use_doc_unwarping=False
+                use_doc_unwarping=False,
+                device='cpu'
             )
         else:
             logger.error(f"不支持的模型: {model_name}")
@@ -207,6 +212,19 @@ def main():
     
     # 设置自定义缓存目录
     setup_custom_cache(cache_dir)
+    
+    # 检测 CUDA 环境（仅提示）
+    cuda_info = check_cuda_environment()
+    if cuda_info['cuda_version']:
+        cu_tag = CUDA_TAG_MAP.get(cuda_info['cuda_version'], 'cu121')
+        logger.info(
+            f"检测到 CUDA {cuda_info['cuda_version']}，"
+            f"GPU: {cuda_info.get('gpu_info', 'N/A')}。"
+            f"推荐安装 GPU 版 PaddlePaddle: "
+            f"pip install paddlepaddle-gpu=={cu_tag}"
+        )
+    elif not cuda_info['cuda_version']:
+        logger.info("未检测到 NVIDIA GPU，使用 CPU 下载")
     
     # 下载模型
     success_count = 0

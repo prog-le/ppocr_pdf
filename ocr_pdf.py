@@ -118,14 +118,34 @@ import pypdfium2 as pdfium
 import cv2
 import numpy as np
 from paddleocr import PaddleOCR, PPStructureV3, PaddleOCRVL
+from device_utils import detect_device, verify_paddle_device
 
 class PDFOCRHandler:
-    def __init__(self, output_dir, model='pp-ocrv5', optimize_pdf=False, optimize_level='medium', grayscale=False):
+    def __init__(self, output_dir, model='pp-ocrv5', device='auto',
+                 optimize_pdf=False, optimize_level='medium', grayscale=False):
         self.output_dir = output_dir
         self.model = model
         self.optimize_pdf_flag = optimize_pdf
         self.optimize_level = optimize_level
         self.grayscale = grayscale
+        self.device = device
+        
+        # 设备检测
+        self.device_info = detect_device(device)
+        paddlex_device = self.device_info['paddlex_device']
+        
+        # 验证 PaddlePaddle 是否能实际使用该设备
+        verify_result = verify_paddle_device(paddlex_device)
+        if verify_result['fallback'] == 'true':
+            corrected_device = verify_result['paddlex_device']
+            logger.warning(f"设备从 {paddlex_device} 回退到 {corrected_device}: "
+                           f"{verify_result['message']}")
+            self.device_info['paddlex_device'] = corrected_device
+            self.device_info['device_type'] = 'cpu (fallback from gpu)'
+            paddlex_device = corrected_device
+        
+        logger.info(f"推理设备: {self.device_info['device_type']} "
+                    f"(传入 PaddleOCR: {paddlex_device})")
         
         # 根据选择的模型配置PaddleOCR
         logger.info(f"正在初始化{model}模型...")
@@ -133,13 +153,15 @@ class PDFOCRHandler:
             # PaddleOCR-VL模型配置
             self.ocr = PaddleOCRVL(
                 use_doc_orientation_classify=False,
-                use_doc_unwarping=False
+                use_doc_unwarping=False,
+                device=paddlex_device
             )
         elif model == 'pp-structurev3':
             # PP-StructureV3模型配置
             self.ocr = PPStructureV3(
                 use_doc_orientation_classify=False,
-                use_doc_unwarping=False
+                use_doc_unwarping=False,
+                device=paddlex_device
             )
         elif model == 'pp-chatocrv4':
             # PP-ChatOCRv4模型需要额外的API配置，暂不支持直接使用
@@ -150,7 +172,8 @@ class PDFOCRHandler:
             self.ocr = PaddleOCR(
                 use_textline_orientation=True, 
                 use_doc_orientation_classify=False,
-                use_doc_unwarping=False
+                use_doc_unwarping=False,
+                device=paddlex_device
             )
         logger.info(f"{model}模型初始化完成")
         
@@ -644,9 +667,11 @@ class PDFOCRHandler:
 
 class PDFFileHandler(FileSystemEventHandler):
     """监控目录中的新PDF文件（同步处理）"""
-    def __init__(self, output_dir, model='pp-ocrv5', optimize_pdf=False, optimize_level='medium', grayscale=False):
+    def __init__(self, output_dir, model='pp-ocrv5', device='auto',
+                 optimize_pdf=False, optimize_level='medium', grayscale=False):
         self.output_dir = output_dir
         self.model = model
+        self.device = device
         self.optimize_pdf_flag = optimize_pdf
         self.optimize_level = optimize_level
         self.grayscale = grayscale
@@ -669,6 +694,7 @@ class PDFFileHandler(FileSystemEventHandler):
         ocr_handler = PDFOCRHandler(
             self.output_dir, 
             self.model,
+            device=self.device,
             optimize_pdf=self.optimize_pdf_flag,
             optimize_level=self.optimize_level,
             grayscale=self.grayscale
@@ -688,7 +714,7 @@ class PDFFileHandler(FileSystemEventHandler):
         logger.info("正在关闭守护模式处理器...")
         logger.info("守护模式处理器已关闭")
 
-def run_manual_mode(input_dir, output_dir, model='pp-ocrv5', optimize_pdf=False, optimize_level='medium', grayscale=False):
+def run_manual_mode(input_dir, output_dir, model='pp-ocrv5', device='auto', optimize_pdf=False, optimize_level='medium', grayscale=False):
     """手动模式：处理输入目录中已存在的所有PDF文件（同步处理）"""
     logger.info(f"手动模式启动，处理目录: {input_dir}")
     
@@ -707,6 +733,7 @@ def run_manual_mode(input_dir, output_dir, model='pp-ocrv5', optimize_pdf=False,
     ocr_handler = PDFOCRHandler(
         output_dir, 
         model,
+        device=device,
         optimize_pdf=optimize_pdf,
         optimize_level=optimize_level,
         grayscale=grayscale
@@ -736,7 +763,7 @@ def run_manual_mode(input_dir, output_dir, model='pp-ocrv5', optimize_pdf=False,
     
     logger.info(f"手动模式处理完成，成功: {success_count} 个，失败: {failed_count} 个，总计: {len(pdf_files)} 个")
 
-def run_daemon_mode(input_dir, output_dir, model='pp-ocrv5', optimize_pdf=False, optimize_level='medium', grayscale=False):
+def run_daemon_mode(input_dir, output_dir, model='pp-ocrv5', device='auto', optimize_pdf=False, optimize_level='medium', grayscale=False):
     """守护模式：持续监控输入目录，处理新的PDF文件"""
     logger.info(f"守护模式启动，监控目录: {input_dir}")
     
@@ -744,6 +771,7 @@ def run_daemon_mode(input_dir, output_dir, model='pp-ocrv5', optimize_pdf=False,
     event_handler = PDFFileHandler(
         output_dir, 
         model,
+        device=device,
         optimize_pdf=optimize_pdf,
         optimize_level=optimize_level,
         grayscale=grayscale
@@ -785,6 +813,8 @@ def main():
     parser.add_argument('--optimize-level', choices=['low', 'medium', 'high'], default='medium', 
                        help='PDF优化级别，可选值：low、medium、high，默认：medium')
     parser.add_argument('--grayscale', action='store_true', help='是否使用灰度渲染，默认：False')
+    parser.add_argument('--device', choices=['auto', 'gpu', 'cpu'], default='auto',
+                       help='推理设备: auto(自动检测), gpu(强制GPU), cpu(强制CPU)，默认 auto')
     
     args = parser.parse_args()
     
@@ -810,6 +840,7 @@ def main():
         ocr_handler = PDFOCRHandler(
             args.output, 
             args.model,
+            device=args.device,
             optimize_pdf=args.optimize_pdf,
             optimize_level=args.optimize_level,
             grayscale=args.grayscale
@@ -824,6 +855,7 @@ def main():
                 args.input, 
                 args.output, 
                 args.model,
+                device=args.device,
                 optimize_pdf=args.optimize_pdf,
                 optimize_level=args.optimize_level,
                 grayscale=args.grayscale
@@ -833,6 +865,7 @@ def main():
                 args.input, 
                 args.output, 
                 args.model,
+                device=args.device,
                 optimize_pdf=args.optimize_pdf,
                 optimize_level=args.optimize_level,
                 grayscale=args.grayscale
