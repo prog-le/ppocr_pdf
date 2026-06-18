@@ -72,7 +72,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "PDF OCR API",
-        "models": ["pp-ocrv5", "pp-structurev3", "paddleocr-vl", "pp-chatocrv4"],
+        "models": ["pp-ocrv6", "pp-ocrv5", "pp-structurev3", "paddleocr-vl", "pp-chatocrv4"],
         "device_modes": ["auto", "gpu", "cpu"],
         "default_device": "auto"
     }
@@ -98,22 +98,26 @@ def device_info():
 @app.post("/ocr/pdf")
 async def ocr_pdf(
     file: UploadFile = File(...),
-    model: Optional[str] = Form(default="pp-ocrv5", description="OCR模型选择: pp-ocrv5, pp-structurev3, paddleocr-vl, pp-chatocrv4"),
+    model: Optional[str] = Form(default="pp-ocrv6", description="OCR模型选择: pp-ocrv6 (默认), pp-ocrv5, pp-structurev3, paddleocr-vl, pp-chatocrv4"),
     device: Optional[str] = Form(default="auto", description="推理设备: auto(自动检测), gpu(强制GPU), cpu(强制CPU)"),
+    lang: Optional[str] = Form(default="ch", description="语言 (PP-OCRv6/v5): ch, chinese_cht, en, japan, korean, latin"),
+    model_size: Optional[str] = Form(default="medium", description="PP-OCRv6 模型尺寸: medium, small, tiny"),
     optimize_pdf: Optional[bool] = Form(default=False, description="是否优化PDF文件"),
     optimize_level: Optional[str] = Form(default="medium", description="PDF优化级别: low, medium, high"),
     grayscale: Optional[bool] = Form(default=False, description="是否使用灰度渲染")
 ):
     """
     处理PDF文件的OCR识别
-    
+
     Args:
         file: 上传的PDF文件
-        model: OCR模型选择，可选值: pp-ocrv5, pp-structurev3, paddleocr-vl, pp-chatocrv4
-        optimize_pdf: 是否优化PDF文件
+        model: OCR模型选择，可选值: pp-ocrv6, pp-ocrv5, pp-structurev3, paddleocr-vl, pp-chatocrv4
+        lang: 语言 (PP-OCRv6/v5)
+        model_size: PP-OCRv6 模型尺寸 (medium/small/tiny)
+        optimize_pdf: 是否优化PDF
         optimize_level: PDF优化级别，可选值: low, medium, high
         grayscale: 是否使用灰度渲染
-    
+
     Returns:
         识别结果
     """
@@ -122,7 +126,7 @@ async def ocr_pdf(
         raise HTTPException(status_code=400, detail="文件类型错误，请上传PDF文件")
     
     # 验证模型选择
-    valid_models = ["pp-ocrv5", "pp-structurev3", "paddleocr-vl", "pp-chatocrv4"]
+    valid_models = ["pp-ocrv6", "pp-ocrv5", "pp-structurev3", "paddleocr-vl", "pp-chatocrv4"]
     if model not in valid_models:
         raise HTTPException(status_code=400, detail=f"模型选择错误，请选择以下模型之一: {', '.join(valid_models)}")
     
@@ -151,9 +155,11 @@ async def ocr_pdf(
             # 初始化OCR处理器
             logger.info(f"初始化OCR处理器，使用模型: {model}")
             ocr_handler = PDFOCRHandler(
-                output_dir, 
+                output_dir,
                 model,
                 device=device,
+                lang=lang,
+                model_size=model_size,
                 optimize_pdf=optimize_pdf,
                 optimize_level=optimize_level,
                 grayscale=grayscale
@@ -186,6 +192,8 @@ async def ocr_pdf(
                     "status": "success",
                     "filename": file.filename,
                     "model": model,
+                    "lang": lang,
+                    "model_size": model_size,
                     "device": device,
                     "device_info": device_info,
                     "result": ocr_result

@@ -125,19 +125,49 @@ from paddleocr import PaddleOCR, PPStructureV3, PaddleOCRVL
 from device_utils import detect_device, verify_paddle_device
 
 class PDFOCRHandler:
-    def __init__(self, output_dir, model='pp-ocrv5', device='auto',
+    def __init__(self, output_dir, model='pp-ocrv6', device='auto',
+                 lang='ch', model_size='medium',
                  optimize_pdf=False, optimize_level='medium', grayscale=False):
+        """
+        初始化 PDF OCR 处理器
+
+        Args:
+            output_dir: 输出目录
+            model: OCR 模型选择
+                - 'paddleocr-vl': 0.9B 视觉语言多模态模型
+                - 'pp-ocrv6': PP-OCRv6 通用文字识别 (默认，50 种语言)
+                - 'pp-ocrv5': PP-OCRv5 旧版通用文字识别
+                - 'pp-structurev3': 复杂文档结构化解析
+                - 'pp-chatocrv4': 信息抽取 (需 API key)
+            device: 推理设备 auto/gpu/cpu
+            lang: PP-OCRv6/v5 语言选择
+                - 'ch': 简体中文 (默认)
+                - 'chinese_cht': 繁体中文
+                - 'en': 英语
+                - 'japan': 日语
+                - 'korean': 韩语
+                - 'latin': 拉丁语系
+            model_size: PP-OCRv6 模型尺寸
+                - 'medium': PP-OCRv6_medium  (默认, 最高精度)
+                - 'small':  PP-OCRv6_small   (平衡精度与速度)
+                - 'tiny':   PP-OCRv6_tiny    (极小体积, 边缘设备)
+            optimize_pdf: 是否优化 PDF
+            optimize_level: PDF 优化级别
+            grayscale: 是否使用灰度渲染
+        """
         self.output_dir = output_dir
         self.model = model
         self.optimize_pdf_flag = optimize_pdf
         self.optimize_level = optimize_level
         self.grayscale = grayscale
         self.device = device
-        
+        self.lang = lang
+        self.model_size = model_size
+
         # 设备检测
         self.device_info = detect_device(device)
         paddlex_device = self.device_info['paddlex_device']
-        
+
         # 验证 PaddlePaddle 是否能实际使用该设备
         verify_result = verify_paddle_device(paddlex_device)
         if verify_result['fallback'] == 'true':
@@ -147,10 +177,10 @@ class PDFOCRHandler:
             self.device_info['paddlex_device'] = corrected_device
             self.device_info['device_type'] = 'cpu (fallback from gpu)'
             paddlex_device = corrected_device
-        
+
         logger.info(f"推理设备: {self.device_info['device_type']} "
                     f"(传入 PaddleOCR: {paddlex_device})")
-        
+
         # 根据选择的模型配置PaddleOCR
         logger.info(f"正在初始化{model}模型...")
         if model == 'paddleocr-vl':
@@ -158,35 +188,67 @@ class PDFOCRHandler:
             self.ocr = PaddleOCRVL(
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
-                device=paddlex_device
+                device=paddlex_device,
+                enable_mkldnn=False  # 禁用 MKLDNN 避免 PIR+oneDNN 属性转换 bug (ConvertPirAttribute2RuntimeAttribute)
             )
         elif model == 'pp-structurev3':
             # PP-StructureV3模型配置
             self.ocr = PPStructureV3(
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
-                device=paddlex_device
+                device=paddlex_device,
+                enable_mkldnn=False  # 禁用 MKLDNN 避免 PIR+oneDNN 属性转换 bug
             )
         elif model == 'pp-chatocrv4':
             # PP-ChatOCRv4模型需要额外的API配置，暂不支持直接使用
             logger.error(f"PP-ChatOCRv4模型需要额外的API配置，暂不支持直接使用")
             raise ValueError(f"{model}模型需要额外的API配置，暂不支持直接使用")
-        else:
-            # 默认PP-OCRv5模型配置
+        elif model in ('pp-ocrv6', 'pp-ocrv5'):
+            # PP-OCRv6/v5 通用文字识别
+            # PP-OCRv6 是 PaddleOCR 3.7+ 默认模型
+            # 通过显式指定 text_*_model_name 锁定到 v6/v5,
+            # 避免 paddleocr 升级时自动变更默认
+            if model == 'pp-ocrv6':
+                det_name = f"PP-OCRv6_{model_size}_det"
+                rec_name = f"PP-OCRv6_{model_size}_rec"
+            else:
+                # 旧版 v5 仍保留兼容入口
+                det_name = f"PP-OCRv5_{model_size}_det"
+                rec_name = f"PP-OCRv5_{model_size}_rec"
+
+            logger.info(f"使用 {model} ({model_size}) 模型, "
+                        f"det={det_name}, rec={rec_name}, lang={lang}")
             self.ocr = PaddleOCR(
-                use_textline_orientation=True, 
+                use_textline_orientation=True,
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
-                device=paddlex_device
+                device=paddlex_device,
+                lang=lang,
+                text_detection_model_name=det_name,
+                text_recognition_model_name=rec_name,
+                enable_mkldnn=False  # 禁用 MKLDNN 避免 PIR+oneDNN 属性转换 bug
+            )
+        else:
+            # 兜底: 未知模型走 PaddleOCR 默认 (v6 medium, ch)
+            logger.warning(f"未知模型 '{model}', 使用 PaddleOCR 默认配置 (PP-OCRv6_medium, lang=ch)")
+            self.ocr = PaddleOCR(
+                use_textline_orientation=True,
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                device=paddlex_device,
+                lang='ch',
+                text_detection_model_name='PP-OCRv6_medium_det',
+                text_recognition_model_name='PP-OCRv6_medium_rec',
+                enable_mkldnn=False
             )
         logger.info(f"{model}模型初始化完成")
-        
-        logger.info(f"使用OCR模型: {model}")
+
+        logger.info(f"使用OCR模型: {model} (lang={lang}, size={model_size})")
         logger.info(f"PDF优化: {'开启' if self.optimize_pdf_flag else '关闭'}")
         if self.optimize_pdf_flag:
             logger.info(f"优化级别: {self.optimize_level}")
         logger.info(f"灰度渲染: {'开启' if self.grayscale else '关闭'}")
-        
+
         # 确保输出目录存在
         os.makedirs(output_dir, exist_ok=True)
     
@@ -671,11 +733,14 @@ class PDFOCRHandler:
 
 class PDFFileHandler(FileSystemEventHandler):
     """监控目录中的新PDF文件（同步处理）"""
-    def __init__(self, output_dir, model='pp-ocrv5', device='auto',
+    def __init__(self, output_dir, model='pp-ocrv6', device='auto',
+                 lang='ch', model_size='medium',
                  optimize_pdf=False, optimize_level='medium', grayscale=False):
         self.output_dir = output_dir
         self.model = model
         self.device = device
+        self.lang = lang
+        self.model_size = model_size
         self.optimize_pdf_flag = optimize_pdf
         self.optimize_level = optimize_level
         self.grayscale = grayscale
@@ -718,7 +783,7 @@ class PDFFileHandler(FileSystemEventHandler):
         logger.info("正在关闭守护模式处理器...")
         logger.info("守护模式处理器已关闭")
 
-def run_manual_mode(input_dir, output_dir, model='pp-ocrv5', device='auto', optimize_pdf=False, optimize_level='medium', grayscale=False):
+def run_manual_mode(input_dir, output_dir, model='pp-ocrv6', device='auto', lang='ch', model_size='medium', optimize_pdf=False, optimize_level='medium', grayscale=False):
     """手动模式：处理输入目录中已存在的所有PDF文件（同步处理）"""
     logger.info(f"手动模式启动，处理目录: {input_dir}")
     
@@ -735,14 +800,16 @@ def run_manual_mode(input_dir, output_dir, model='pp-ocrv5', device='auto', opti
     
     # 初始化OCR处理器
     ocr_handler = PDFOCRHandler(
-        output_dir, 
+        output_dir,
         model,
         device=device,
+        lang=lang,
+        model_size=model_size,
         optimize_pdf=optimize_pdf,
         optimize_level=optimize_level,
         grayscale=grayscale
     )
-    
+
     # 同步处理所有PDF文件
     success_count = 0
     failed_count = 0
@@ -767,15 +834,17 @@ def run_manual_mode(input_dir, output_dir, model='pp-ocrv5', device='auto', opti
     
     logger.info(f"手动模式处理完成，成功: {success_count} 个，失败: {failed_count} 个，总计: {len(pdf_files)} 个")
 
-def run_daemon_mode(input_dir, output_dir, model='pp-ocrv5', device='auto', optimize_pdf=False, optimize_level='medium', grayscale=False):
+def run_daemon_mode(input_dir, output_dir, model='pp-ocrv6', device='auto', lang='ch', model_size='medium', optimize_pdf=False, optimize_level='medium', grayscale=False):
     """守护模式：持续监控输入目录，处理新的PDF文件"""
     logger.info(f"守护模式启动，监控目录: {input_dir}")
     
     # 创建事件处理器
     event_handler = PDFFileHandler(
-        output_dir, 
+        output_dir,
         model,
         device=device,
+        lang=lang,
+        model_size=model_size,
         optimize_pdf=optimize_pdf,
         optimize_level=optimize_level,
         grayscale=grayscale
@@ -809,8 +878,23 @@ def main():
     parser.add_argument('-o', '--output', required=True, help='输出目录路径')
     parser.add_argument('-m', '--mode', choices=['manual', 'daemon'], default='manual', 
                        help='工作模式：manual（手动模式）或 daemon（守护模式）')
-    parser.add_argument('-model', '--model', choices=['paddleocr-vl', 'pp-ocrv5', 'pp-structurev3', 'pp-chatocrv4'], 
-                       default='pp-ocrv5', help='OCR模型选择：paddleocr-vl（多模态文档解析）、pp-ocrv5（全场景文字识别）、pp-structurev3（复杂文档解析）、pp-chatocrv4（智能信息抽取）')
+    parser.add_argument('-model', '--model',
+                       choices=['paddleocr-vl', 'pp-ocrv6', 'pp-ocrv5', 'pp-structurev3', 'pp-chatocrv4'],
+                       default='pp-ocrv6',
+                       help='OCR模型选择: paddleocr-vl (多模态文档解析) / '
+                            'pp-ocrv6 (PP-OCRv6 通用文字识别, 50 种语言, 默认) / '
+                            'pp-ocrv5 (旧版) / '
+                            'pp-structurev3 (复杂文档解析) / '
+                            'pp-chatocrv4 (智能信息抽取, 需 API key)')
+    parser.add_argument('--lang', default='ch',
+                       choices=['ch', 'chinese_cht', 'en', 'japan', 'korean', 'latin'],
+                       help='语言 (PP-OCRv6/v5): ch (简体中文, 默认) / '
+                            'chinese_cht (繁体中文) / en (英语) / '
+                            'japan (日语) / korean (韩语) / latin (拉丁语系)')
+    parser.add_argument('--model-size', default='medium',
+                       choices=['medium', 'small', 'tiny'],
+                       help='PP-OCRv6 模型尺寸: medium (最高精度, 默认) / '
+                            'small (平衡) / tiny (极小, 边缘设备)')
     parser.add_argument('-l', '--log-level', choices=LOG_LEVELS.keys(), default='info', 
                        help='日志输出级别：debug、info、warning、error、critical，默认：info')
     parser.add_argument('--optimize-pdf', action='store_true', help='是否优化PDF文件，默认：False')
@@ -842,9 +926,11 @@ def main():
         
         logger.info(f"手动模式启动，处理单个文件: {args.input}")
         ocr_handler = PDFOCRHandler(
-            args.output, 
+            args.output,
             args.model,
             device=args.device,
+            lang=args.lang,
+            model_size=args.model_size,
             optimize_pdf=args.optimize_pdf,
             optimize_level=args.optimize_level,
             grayscale=args.grayscale
@@ -856,20 +942,24 @@ def main():
         # 根据模式运行
         if args.mode == 'manual':
             run_manual_mode(
-                args.input, 
-                args.output, 
+                args.input,
+                args.output,
                 args.model,
                 device=args.device,
+                lang=args.lang,
+                model_size=args.model_size,
                 optimize_pdf=args.optimize_pdf,
                 optimize_level=args.optimize_level,
                 grayscale=args.grayscale
             )
         else:
             run_daemon_mode(
-                args.input, 
-                args.output, 
+                args.input,
+                args.output,
                 args.model,
                 device=args.device,
+                lang=args.lang,
+                model_size=args.model_size,
                 optimize_pdf=args.optimize_pdf,
                 optimize_level=args.optimize_level,
                 grayscale=args.grayscale
