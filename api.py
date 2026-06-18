@@ -3,6 +3,10 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 import os
+
+# 必须在 paddle 加载前设置，否则 PIR 执行器 bug (ConvertPirAttribute2RuntimeAttribute) 会造成页面崩溃
+os.environ.setdefault("FLAGS_enable_pir_api", "0")
+
 import tempfile
 import logging
 from ocr_pdf import PDFOCRHandler

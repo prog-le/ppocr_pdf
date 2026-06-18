@@ -37,6 +37,10 @@
 
 # 导入必要的库
 import os
+
+# 必须在 paddle 加载前设置，否则 PIR 执行器 bug (ConvertPirAttribute2RuntimeAttribute) 会造成页面崩溃
+os.environ.setdefault("FLAGS_enable_pir_api", "0")
+
 import time
 import argparse
 import logging
