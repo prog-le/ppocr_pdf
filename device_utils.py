@@ -47,6 +47,7 @@ NVIDIA_SMI_NAMES = ["nvidia-smi", "nvidia-smi.exe"]
 # 官方推荐的 CUDA → paddlepaddle-gpu 对照表
 # 参考 https://www.paddlepaddle.org.cn/install/quick
 CUDA_TAG_MAP: dict[str, str] = {
+    "12.9": "cu129",
     "12.6": "cu126",
     "12.5": "cu125",
     "12.4": "cu124",

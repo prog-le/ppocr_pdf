@@ -189,6 +189,7 @@ class PDFOCRHandler:
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
                 device=paddlex_device,
+                use_queues=False,  # 禁用多线程队列模式: 默认 YAML 中 use_queues=True, 但 Paddle 的 VLM 模型在多线程下不线程安全, 会抛出空异常
                 enable_mkldnn=False  # 禁用 MKLDNN 避免 PIR+oneDNN 属性转换 bug (ConvertPirAttribute2RuntimeAttribute)
             )
         elif model == 'pp-structurev3':
@@ -226,7 +227,7 @@ class PDFOCRHandler:
                 lang=lang,
                 text_detection_model_name=det_name,
                 text_recognition_model_name=rec_name,
-                enable_mkldnn=False  # 禁用 MKLDNN 避免 PIR+oneDNN 属性转换 bug
+                enable_mkldnn=False  # 禁用 MKLDNN 避免 PIR+oneDNN 属性转换 bug (ConvertPirAttribute2RuntimeAttribute)
             )
         else:
             # 兜底: 未知模型走 PaddleOCR 默认 (v6 medium, ch)
@@ -239,7 +240,7 @@ class PDFOCRHandler:
                 lang='ch',
                 text_detection_model_name='PP-OCRv6_medium_det',
                 text_recognition_model_name='PP-OCRv6_medium_rec',
-                enable_mkldnn=False
+                enable_mkldnn=False  # 禁用 MKLDNN 避免 PIR+oneDNN 属性转换 bug (ConvertPirAttribute2RuntimeAttribute)
             )
         logger.info(f"{model}模型初始化完成")
 

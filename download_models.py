@@ -164,6 +164,7 @@ def download_model(model_name, lang='ch', model_size='medium'):
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
                 device='cpu',
+                use_queues=False,  # 禁用多线程队列模式: 默认 YAML 中 use_queues=True, 但 Paddle 的 VLM 模型在多线程下不线程安全
                 enable_mkldnn=False  # 禁用 MKLDNN 避免 PIR+oneDNN 属性转换 bug
             )
         else:
