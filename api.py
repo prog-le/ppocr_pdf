@@ -3,6 +3,8 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 import os
+import json          # ← 新增：用于序列化 413 响应
+import asyncio       # ← 新增：用于 handler 缓存的 Lock
 
 # 必须在 paddle 加载前设置，否则 PIR 执行器 bug (ConvertPirAttribute2RuntimeAttribute) 会造成页面崩溃
 os.environ.setdefault("FLAGS_enable_pir_api", "0")
@@ -11,6 +13,57 @@ import tempfile
 import logging
 from ocr_pdf import PDFOCRHandler
 from device_utils import detect_device
+
+# ---------------------------------------------------------------------------
+# PDFOCRHandler 缓存 + 并发控制
+# 实现：(model, device, lang, model_size, optimize_pdf, optimize_level, grayscale)
+#       七元组到 handler 实例的映射，避免每次请求重复初始化（30s–2min）
+# 注意：PaddleOCR 实例非线程安全，每个 handler 绑定一个 asyncio.Lock
+# ---------------------------------------------------------------------------
+_HANDLER_CACHE: dict[tuple, "PDFOCRHandler"] = {}
+_HANDLER_LOCKS: dict[tuple, asyncio.Lock] = {}
+
+
+def get_handler(
+    output_dir: str,
+    model: str,
+    device: str,
+    lang: str,
+    model_size: str,
+    optimize_pdf: bool,
+    optimize_level: str,
+    grayscale: bool,
+) -> "PDFOCRHandler":
+    """获取或创建 PDFOCRHandler 实例（按模型参数缓存）
+
+    Cache key = (model, device, lang, model_size, optimize_pdf, optimize_level, grayscale)
+    output_dir 不参与 key（因每次请求不同），在返回缓存实例时覆盖。
+    """
+    key = (model, device, lang, model_size, optimize_pdf, optimize_level, grayscale)
+    handler = _HANDLER_CACHE.get(key)
+    if handler is not None:
+        # 缓存命中：更新 output_dir（每次请求不同临时目录）
+        handler.output_dir = output_dir
+        return handler
+    # 缓存未命中：创建新 handler 并缓存
+    handler = PDFOCRHandler(
+        output_dir, model,
+        device=device,
+        lang=lang,
+        model_size=model_size,
+        optimize_pdf=optimize_pdf,
+        optimize_level=optimize_level,
+        grayscale=grayscale,
+    )
+    _HANDLER_CACHE[key] = handler
+    return handler
+
+
+def clear_handler_cache():
+    """清空 handler 缓存（测试环境使用，避免 mock 实例跨测试污染）"""
+    _HANDLER_CACHE.clear()
+    _HANDLER_LOCKS.clear()
+
 
 # 配置日志级别映射
 LOG_LEVELS = {
@@ -44,11 +97,78 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# 添加CORS中间件（允许Web前端跨域调用）
+# ---------------------------------------------------------------------------
+# 上传大小限制中间件（必须在 CORS 之前注册，作为最外层先检查大小）
+# ---------------------------------------------------------------------------
+_MAX_UPLOAD_SIZE_MB = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "200"))
+_MAX_UPLOAD_SIZE = _MAX_UPLOAD_SIZE_MB * 1024 * 1024
+
+
+class MaxBodySizeMiddleware:
+    """ASGI 中间件：限制请求体大小，超过时返回 413 Payload Too Large
+
+    检查 Content-Length 头，若超过阈值则在请求到达路由之前直接拒绝。
+    注册为最外层中间件，超大 body 不会进入 CORS 和路由处理。
+    """
+
+    def __init__(self, app, max_size: int = _MAX_UPLOAD_SIZE):
+        self.app = app
+        self.max_size = max_size
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # 读取 Content-Length 头（bytes 格式）
+        content_length = 0
+        for name, value in scope.get("headers", []):
+            if name == b"content-length":
+                try:
+                    content_length = int(value)
+                except (ValueError, TypeError):
+                    pass
+                break
+
+        if content_length > self.max_size:
+            body = json.dumps({
+                "detail": f"文件大小超过限制，最大允许 {_MAX_UPLOAD_SIZE_MB} MB"
+            }).encode("utf-8")
+            await send({
+                "type": "http.response.start",
+                "status": 413,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                ],
+            })
+            await send({
+                "type": "http.response.body",
+                "body": body,
+            })
+            return
+
+        await self.app(scope, receive, send)
+
+
+# 添加中间件（注意：FastAPI 中间件为 LIFO 顺序——后注册的最先执行）
+# MaxBodySize 后注册，作为最外层，请求先检查大小再进入 CORS 和路由
+app.add_middleware(MaxBodySizeMiddleware, max_size=_MAX_UPLOAD_SIZE)
+
+# CORS 中间件（允许 Web 前端跨域调用）
+# 安全说明：
+# - 当 CORS_ALLOW_ORIGINS 环境变量未设置时，使用 ["*"] + allow_credentials=False
+# - 当设置了 CORS_ALLOW_ORIGINS（逗号分隔），使用白名单 + allow_credentials=True
+_cors_origins_str = os.environ.get("CORS_ALLOW_ORIGINS", "")
+if _cors_origins_str:
+    _cors_allow_origins = [origin.strip() for origin in _cors_origins_str.split(",") if origin.strip()]
+else:
+    _cors_allow_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_allow_origins,
+    allow_credentials=bool(_cors_origins_str),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -152,22 +272,26 @@ async def ocr_pdf(
             output_dir = os.path.join(tmp_dir, "output")
             os.makedirs(output_dir, exist_ok=True)
             
-            # 初始化OCR处理器
-            logger.info(f"初始化OCR处理器，使用模型: {model}")
-            ocr_handler = PDFOCRHandler(
-                output_dir,
-                model,
+            # 获取或创建OCR处理器（工厂函数，带缓存+并发锁）
+            logger.info(f"获取OCR处理器，使用模型: {model}")
+            ocr_handler = get_handler(
+                output_dir, model,
                 device=device,
                 lang=lang,
                 model_size=model_size,
                 optimize_pdf=optimize_pdf,
                 optimize_level=optimize_level,
-                grayscale=grayscale
+                grayscale=grayscale,
             )
-            
-            # 处理PDF文件
+
+            # 处理PDF文件（同一 handler 的并发调用通过 asyncio.Lock 串行化）
             logger.info(f"开始处理PDF文件: {file.filename}")
-            success = ocr_handler.process_pdf(pdf_path)
+            lock = _HANDLER_LOCKS.setdefault(
+                (model, device, lang, model_size, optimize_pdf, optimize_level, grayscale),
+                asyncio.Lock(),
+            )
+            async with lock:
+                success = ocr_handler.process_pdf(pdf_path)
             
             if not success:
                 raise HTTPException(status_code=500, detail="PDF文件处理失败")
@@ -208,12 +332,11 @@ async def ocr_pdf(
         logger.debug(f"完整错误堆栈: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"处理PDF文件时发生错误: {str(e)}")
 
-# 运行API服务
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "api:app",
         host="0.0.0.0",
-        port=8000,
-        reload=True
+        port=int(os.environ.get("PORT", "8000")),
+        reload=os.environ.get("UVICORN_RELOAD", "0") == "1"
     )

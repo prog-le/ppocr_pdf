@@ -14,6 +14,13 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+@pytest.fixture(autouse=True)
+def _clear_handler_cache():
+    """每个测试前清除 handler 缓存，防止 mock 实例跨测试污染"""
+    from api import clear_handler_cache
+    clear_handler_cache()
+
+
 class TestAPIDevice:
     """测试 API device 参数传递"""
 

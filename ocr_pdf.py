@@ -307,7 +307,7 @@ class PDFOCRHandler:
             return optimized_pdf_path
             
         except Exception as e:
-            logger.error(f"PDF优化失败: {str(e)}")
+            logger.warning(f"PDF优化失败（将使用原始文件进行OCR识别）: {str(e)}")
             import traceback
             logger.debug(f"完整错误堆栈: {traceback.format_exc()}")
             # 如果优化失败，返回原始文件路径
