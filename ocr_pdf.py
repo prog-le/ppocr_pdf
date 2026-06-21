@@ -47,6 +47,15 @@ import logging
 import sys
 from PyPDF2 import PdfReader, PdfWriter
 
+# PP-ChatOCRv4 运行时补丁：修复 LLM JSON 数组/裸字符串解析 + 注入 few-shot 示例
+# 无论当前是否使用 pp-chatocrv4 模型，提前 import 确保补丁就位
+try:
+    import chatocr_patch  # noqa: F401  (patches apply on import)
+
+    chatocr_patch  # silence linter
+except ImportError:
+    pass
+
 # 配置日志级别映射
 LOG_LEVELS = {
     'debug': logging.DEBUG,

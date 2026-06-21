@@ -65,6 +65,14 @@ def clear_handler_cache():
     _HANDLER_LOCKS.clear()
 
 
+# PP-ChatOCRv4 运行时补丁：修复 LLM JSON 数组/裸字符串解析 + 注入 few-shot 示例
+try:
+    import chatocr_patch  # noqa: F401  (patches apply on import)
+
+    chatocr_patch
+except ImportError:
+    pass
+
 # 配置日志级别映射
 LOG_LEVELS = {
     'debug': logging.DEBUG,
