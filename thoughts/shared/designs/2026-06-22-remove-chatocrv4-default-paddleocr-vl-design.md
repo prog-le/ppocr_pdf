@@ -1,7 +1,17 @@
 ---
 date: 2026-06-22
 topic: "禁用 PP-ChatOCRv4 + 移除 pp-ocrv5 + 默认 PaddleOCR-VL"
-status: draft
+status: validated
+
+## 基线确认 (2026-06-22 00:10)
+
+用户预先测试 `python ocr_pdf.py -i .\test.pdf -o .\ --device gpu`（默认 `pp-ocrv6`），运行成功：
+- GPU 0 (CC 8.9) 激活，PP-OCRv6_medium_det + PP-OCRv6_medium_rec 从 ModelScope 下载
+- 单 PDF 处理完成，无错误
+- 验证 `--device gpu` 仍工作（device_utils.py 未改）
+- 验证 `PaddleOCR(...)` 走默认 v6 medium 兜底分支仍正常
+
+**基线 = 重构后必须保持的最小行为。** 默认 model 切到 `paddleocr-vl` 后的新基线验收需走相同命令（但 `-model paddleocr-vl`）。
 ---
 
 # 禁用 PP-ChatOCRv4 + 收窄到 3 模型 + 默认 PaddleOCR-VL 设计
