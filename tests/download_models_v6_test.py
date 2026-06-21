@@ -65,30 +65,12 @@ class TestDownloadModelsV6:
             call_kwargs = mock_ocr.call_args[1]
             assert call_kwargs.get('lang') == 'en'
 
-    def test_pp_ocrv5_uses_v5_model_names(self):
-        """pp-ocrv5 仍使用 PP-OCRv5_* 模型名 (兼容旧版)"""
-        from download_models import download_model
-
-        with (
-            patch('download_models.setup_custom_cache'),
-            patch('paddleocr.PaddleOCR') as mock_ocr,
-            patch('download_models.logger'),
-        ):
-            mock_ocr.return_value = MagicMock()
-            result = download_model('pp-ocrv5')
-
-            call_kwargs = mock_ocr.call_args[1]
-            assert call_kwargs.get('text_detection_model_name') == 'PP-OCRv5_medium_det'
-            assert call_kwargs.get('text_recognition_model_name') == 'PP-OCRv5_medium_rec'
-
-    def test_supported_models_includes_v6(self):
-        """SUPPORTED_MODELS 列表应包含 pp-ocrv6"""
+    def test_supported_models_includes_correct_models(self):
+        """SUPPORTED_MODELS 列表应包含 3 模型，不含 pp-ocrv5"""
         from download_models import SUPPORTED_MODELS
 
-        assert 'pp-ocrv6' in SUPPORTED_MODELS
-        assert 'pp-ocrv5' in SUPPORTED_MODELS
-        assert 'pp-structurev3' in SUPPORTED_MODELS
-        assert 'paddleocr-vl' in SUPPORTED_MODELS
+        assert SUPPORTED_MODELS == ['pp-ocrv6', 'pp-structurev3', 'paddleocr-vl'], \
+            f"Got {SUPPORTED_MODELS}"
 
     def test_cli_has_lang_and_model_size(self):
         """CLI 解析器包含 --lang 和 --model-size"""

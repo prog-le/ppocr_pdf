@@ -70,7 +70,7 @@ class TestAPIDevice:
                     mock_file.__enter__.return_value.read.return_value = "OCR result"
                     mock_open.return_value = mock_file
 
-                    req_data = data or {"model": "pp-ocrv5"}
+                    req_data = data or {"model": "paddleocr-vl"}
                     return client.post(
                         "/ocr/pdf",
                         files={"file": ("test.pdf", fake_pdf.read_bytes(), "application/pdf")},
@@ -80,7 +80,7 @@ class TestAPIDevice:
     def test_device_param_accepted(self, client, tmp_path):
         """device 表单参数被正确接收"""
         response, mock_handler = self._make_ocr_request(
-            client, tmp_path, {"model": "pp-ocrv5", "device": "gpu"}
+            client, tmp_path, {"model": "paddleocr-vl", "device": "gpu"}
         )
         assert response.status_code == 200
         call_kwargs = mock_handler.call_args[1]
@@ -89,7 +89,7 @@ class TestAPIDevice:
     def test_device_default_is_auto(self, client, tmp_path):
         """device 默认值为 auto"""
         response, mock_handler = self._make_ocr_request(
-            client, tmp_path, {"model": "pp-ocrv5"}
+            client, tmp_path, {"model": "paddleocr-vl"}
         )
         assert response.status_code == 200
         call_kwargs = mock_handler.call_args[1]
@@ -98,7 +98,7 @@ class TestAPIDevice:
     def test_device_cpu_override(self, client, tmp_path):
         """device=cpu 强制 CPU"""
         response, mock_handler = self._make_ocr_request(
-            client, tmp_path, {"model": "pp-ocrv5", "device": "cpu"}
+            client, tmp_path, {"model": "paddleocr-vl", "device": "cpu"}
         )
         assert response.status_code == 200
         call_kwargs = mock_handler.call_args[1]
@@ -107,7 +107,7 @@ class TestAPIDevice:
     def test_device_invalid_rejected(self, client, tmp_path):
         """非法的 device 值应返回 400"""
         response, _ = self._make_ocr_request(
-            client, tmp_path, {"model": "pp-ocrv5", "device": "mps"}
+            client, tmp_path, {"model": "paddleocr-vl", "device": "mps"}
         )
         assert response.status_code == 400
         assert "设备参数错误" in response.json()["detail"]
@@ -115,7 +115,7 @@ class TestAPIDevice:
     def test_response_includes_device_and_device_info(self, client, tmp_path):
         """OCR 响应中包含 device 和 device_info"""
         response, _ = self._make_ocr_request(
-            client, tmp_path, {"model": "pp-ocrv5", "device": "auto"}
+            client, tmp_path, {"model": "paddleocr-vl", "device": "auto"}
         )
         assert response.status_code == 200
         data = response.json()
@@ -140,6 +140,17 @@ class TestAPIDevice:
             assert "device" in data
             assert "supported_devices" in data
             assert data["device"] == "cpu"
+
+    def test_valid_models_excludes_chatocrv4_and_ppocrv5(self, client):
+        """验证 api.valid_models 只含 3 模型，不含 pp-chatocrv4 和 pp-ocrv5"""
+        from api import valid_models
+        expected = ["paddleocr-vl", "pp-ocrv6", "pp-structurev3"]
+        assert valid_models == expected, f"Expected {expected}, got {valid_models}"
+
+    def test_chatocr_patch_file_removed(self):
+        """验证 chatocr_patch.py 已被删除（不在仓库）"""
+        assert not os.path.exists('chatocr_patch.py'), \
+            "chatocr_patch.py 应该被删除"
 
 
 if __name__ == '__main__':

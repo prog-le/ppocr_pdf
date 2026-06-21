@@ -16,8 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 class TestPDFOCRHandlerDevice:
     """测试 PDFOCRHandler 设备参数传递"""
 
-    def test_device_passed_to_paddleocr(self):
-        """检测到的 paddlex_device 传入 PaddleOCR 构造函数"""
+    def test_device_passed_to_paddleocr_v6(self):
+        """pp-ocrv6 将 paddlex_device 传入 PaddleOCR 构造函数"""
         from ocr_pdf import PDFOCRHandler
 
         mock_device_info = {
@@ -42,7 +42,7 @@ class TestPDFOCRHandlerDevice:
         ):
             handler = PDFOCRHandler(
                 output_dir='test_out',
-                model='pp-ocrv5',
+                model='pp-ocrv6',
                 device='auto'
             )
             call_kwargs = mock_paddle_ocr.call_args[1]
@@ -69,15 +69,15 @@ class TestPDFOCRHandlerDevice:
         with (
             patch('ocr_pdf.detect_device', return_value=mock_device_info),
             patch('ocr_pdf.verify_paddle_device', return_value=verify_ok),
-            patch('ocr_pdf.PaddleOCR') as mock_paddle_ocr,
+            patch('ocr_pdf.PaddleOCRVL') as mock_vl,
             patch('ocr_pdf.logger'),
         ):
             handler = PDFOCRHandler(
                 output_dir='test_out',
-                model='pp-ocrv5',
+                model='paddleocr-vl',
                 device='cpu'
             )
-            call_kwargs = mock_paddle_ocr.call_args[1]
+            call_kwargs = mock_vl.call_args[1]
             assert call_kwargs.get('device') == 'cpu'
 
     def test_device_passed_to_pp_structure_v3(self):

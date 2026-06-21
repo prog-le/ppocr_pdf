@@ -141,23 +141,6 @@ class TestPPOCRv6ModelSelection:
             assert call_kwargs.get('text_detection_model_name') == 'PP-OCRv6_small_det'
             assert call_kwargs.get('text_recognition_model_name') == 'PP-OCRv6_small_rec'
 
-    def test_pp_ocrv5_uses_v5_model_names(self):
-        """model=pp-ocrv5 仍使用 PP-OCRv5_* 模型名 (兼容旧版)"""
-        from ocr_pdf import PDFOCRHandler
-
-        with (
-            patch('ocr_pdf.detect_device', return_value=_mock_device_info()),
-            patch('ocr_pdf.verify_paddle_device', return_value=_verify_ok()),
-            patch('ocr_pdf.PaddleOCR') as mock_paddle_ocr,
-            patch('ocr_pdf.logger'),
-        ):
-            mock_paddle_ocr.return_value = MagicMock()
-            PDFOCRHandler(output_dir='test_out', model='pp-ocrv5', model_size='medium')
-
-            call_kwargs = mock_paddle_ocr.call_args[1]
-            assert call_kwargs.get('text_detection_model_name') == 'PP-OCRv5_medium_det'
-            assert call_kwargs.get('text_recognition_model_name') == 'PP-OCRv5_medium_rec'
-
     def test_unknown_model_falls_back_to_v6_medium(self):
         """未知 model 应回退到 PP-OCRv6_medium + lang=ch"""
         from ocr_pdf import PDFOCRHandler
@@ -211,8 +194,8 @@ class TestCLIPv6Args:
         args = parser.parse_args([])
         assert args.model_size == 'medium'
 
-    def test_cli_default_model_is_pp_ocrv6(self):
-        """CLI 默认 -model 应该是 pp-ocrv6"""
+    def test_cli_default_model_is_paddleocr_vl(self):
+        """CLI 默认 -model 应该是 paddleocr-vl"""
         import argparse
         from ocr_pdf import main
         from unittest.mock import patch
@@ -233,7 +216,7 @@ class TestCLIPv6Args:
                 except Exception:
                     pass  # 实际运行会失败 (无 PDF), 但 args 应被解析
 
-        assert captured.get('model') == 'pp-ocrv6', f"Expected default 'pp-ocrv6', got {captured.get('model')}"
+        assert captured.get('model') == 'paddleocr-vl', f"Expected default 'paddleocr-vl', got {captured.get('model')}"
         assert captured.get('lang') == 'ch'
         assert captured.get('model_size') == 'medium'
 
