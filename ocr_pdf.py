@@ -136,6 +136,7 @@ from device_utils import detect_device, verify_paddle_device
 class PDFOCRHandler:
     def __init__(self, output_dir, model='pp-ocrv6', device='auto',
                  lang='ch', model_size='medium',
+                 output_formats=None,
                  optimize_pdf=False, optimize_level='medium', grayscale=False):
         """
         初始化 PDF OCR 处理器
@@ -160,6 +161,7 @@ class PDFOCRHandler:
                 - 'medium': PP-OCRv6_medium  (默认, 最高精度)
                 - 'small':  PP-OCRv6_small   (平衡精度与速度)
                 - 'tiny':   PP-OCRv6_tiny    (极小体积, 边缘设备)
+            output_formats: 输出格式列表, 默认 ['markdown','json','img','pdf']
             optimize_pdf: 是否优化 PDF
             optimize_level: PDF 优化级别
             grayscale: 是否使用灰度渲染
@@ -172,6 +174,11 @@ class PDFOCRHandler:
         self.device = device
         self.lang = lang
         self.model_size = model_size
+
+        # 输出格式选择
+        if output_formats is None:
+            output_formats = ['markdown', 'json', 'img', 'pdf']
+        self.output_formats = output_formats
 
         # 设备检测
         self.device_info = detect_device(device)
@@ -356,6 +363,7 @@ class PDFOCRHandler:
             
             # 识别结果
             ocr_results = []
+            page_raw_results = []
             
             # 逐页处理
             for page_num in range(total_pages):
@@ -436,6 +444,7 @@ class PDFOCRHandler:
                         if result:
                             # 将生成器转换为列表以便处理
                             result_list = list(result)
+                            page_raw_results.append(result_list)
                             
                             # 根据模型类型处理不同的输出格式
                             if self.model == 'pp-structurev3':
@@ -683,6 +692,66 @@ class PDFOCRHandler:
                 with open(output_txt_path, 'w', encoding='utf-8') as f:
                     f.write('\n'.join(ocr_results))
                 logger.info(f"PDF文件处理完成，结果保存至: {output_txt_path}")
+                # === 新增: 可选输出格式 (output_formats) ===
+                if self.output_formats and page_raw_results:
+                    import glob as glob_module
+                    
+                    for page_idx, page_res_list in enumerate(page_raw_results):
+                        page_num = page_idx + 1
+                        
+                        for res in page_res_list:
+                            # JSON: 所有模型都支持
+                            if 'json' in self.output_formats:
+                                try:
+                                    json_path = os.path.join(self.output_dir, f"{filename}.json")
+                                    res.save_to_json(json_path)
+                                except AttributeError:
+                                    try:
+                                        import json as json_module
+                                        json_path = os.path.join(self.output_dir, f"{filename}.json")
+                                        with open(json_path, 'w', encoding='utf-8') as jf:
+                                            json_module.dump({"text": ocr_results}, jf, ensure_ascii=False, indent=2)
+                                    except Exception as e2:
+                                        logger.error(f"保存 JSON 失败: {e2}")
+                                except Exception as e:
+                                    logger.error(f"保存 JSON 失败: {e}")
+                            
+                            # Markdown: 仅结构类模型支持 (pp-ocrv6 跳过)
+                            if 'markdown' in self.output_formats:
+                                if hasattr(res, 'save_to_markdown') and self.model != 'pp-ocrv6':
+                                    try:
+                                        md_path = os.path.join(self.output_dir, f"{filename}.md")
+                                        res.save_to_markdown(md_path)
+                                    except Exception as e:
+                                        logger.error(f"保存 Markdown 失败: {e}")
+                                elif self.model == 'pp-ocrv6':
+                                    logger.warning(f"pp-ocrv6 不支持 markdown 输出, 已跳过")
+                            
+                            # Annotated Image: 所有模型都支持
+                            if 'img' in self.output_formats:
+                                try:
+                                    img_path = os.path.join(self.output_dir, f"{filename}_p{page_num:03d}.png")
+                                    if hasattr(res, 'save_to_img'):
+                                        res.save_to_img(img_path)
+                                except Exception as e:
+                                    logger.error(f"保存标注图片失败: {e}")
+                    
+                    # PDF (annotated layout PDF): 收集所有 PNG, 打包为单 PDF
+                    if 'pdf' in self.output_formats:
+                        try:
+                            import img2pdf
+                            png_files = sorted(
+                                glob_module.glob(os.path.join(self.output_dir, f"{filename}_p*.png"))
+                            )
+                            if png_files:
+                                pdf_path = os.path.join(self.output_dir, f"{filename}_annotated.pdf")
+                                with open(pdf_path, 'wb') as f:
+                                    f.write(img2pdf.convert([str(p) for p in png_files]))
+                                logger.info(f"标注 PDF 已生成: {pdf_path}")
+                        except ImportError:
+                            logger.error("缺少 img2pdf, 请执行: pip install img2pdf")
+                        except Exception as e:
+                            logger.error(f"生成标注 PDF 失败: {e}")
                 success = True
                 return True
             else:
@@ -745,6 +814,7 @@ class PDFFileHandler(FileSystemEventHandler):
     """监控目录中的新PDF文件（同步处理）"""
     def __init__(self, output_dir, model='pp-ocrv6', device='auto',
                  lang='ch', model_size='medium',
+                 output_formats=None,
                  optimize_pdf=False, optimize_level='medium', grayscale=False):
         self.output_dir = output_dir
         self.model = model
@@ -754,6 +824,9 @@ class PDFFileHandler(FileSystemEventHandler):
         self.optimize_pdf_flag = optimize_pdf
         self.optimize_level = optimize_level
         self.grayscale = grayscale
+        if output_formats is None:
+            output_formats = ['markdown', 'json', 'img', 'pdf']
+        self.output_formats = output_formats
         logger.info(f"初始化守护模式处理器，使用模型: {model}")
     
     def on_created(self, event):
@@ -774,6 +847,7 @@ class PDFFileHandler(FileSystemEventHandler):
             self.output_dir, 
             self.model,
             device=self.device,
+            output_formats=self.output_formats,
             optimize_pdf=self.optimize_pdf_flag,
             optimize_level=self.optimize_level,
             grayscale=self.grayscale
@@ -793,7 +867,9 @@ class PDFFileHandler(FileSystemEventHandler):
         logger.info("正在关闭守护模式处理器...")
         logger.info("守护模式处理器已关闭")
 
-def run_manual_mode(input_dir, output_dir, model='pp-ocrv6', device='auto', lang='ch', model_size='medium', optimize_pdf=False, optimize_level='medium', grayscale=False):
+def run_manual_mode(input_dir, output_dir, model='pp-ocrv6', device='auto', lang='ch', model_size='medium',
+                    output_formats=None,
+                    optimize_pdf=False, optimize_level='medium', grayscale=False):
     """手动模式：处理输入目录中已存在的所有PDF文件（同步处理）"""
     logger.info(f"手动模式启动，处理目录: {input_dir}")
     
@@ -815,6 +891,7 @@ def run_manual_mode(input_dir, output_dir, model='pp-ocrv6', device='auto', lang
         device=device,
         lang=lang,
         model_size=model_size,
+        output_formats=output_formats,
         optimize_pdf=optimize_pdf,
         optimize_level=optimize_level,
         grayscale=grayscale
@@ -844,7 +921,9 @@ def run_manual_mode(input_dir, output_dir, model='pp-ocrv6', device='auto', lang
     
     logger.info(f"手动模式处理完成，成功: {success_count} 个，失败: {failed_count} 个，总计: {len(pdf_files)} 个")
 
-def run_daemon_mode(input_dir, output_dir, model='pp-ocrv6', device='auto', lang='ch', model_size='medium', optimize_pdf=False, optimize_level='medium', grayscale=False):
+def run_daemon_mode(input_dir, output_dir, model='pp-ocrv6', device='auto', lang='ch', model_size='medium',
+                    output_formats=None,
+                    optimize_pdf=False, optimize_level='medium', grayscale=False):
     """守护模式：持续监控输入目录，处理新的PDF文件"""
     logger.info(f"守护模式启动，监控目录: {input_dir}")
     
@@ -855,6 +934,7 @@ def run_daemon_mode(input_dir, output_dir, model='pp-ocrv6', device='auto', lang
         device=device,
         lang=lang,
         model_size=model_size,
+        output_formats=output_formats,
         optimize_pdf=optimize_pdf,
         optimize_level=optimize_level,
         grayscale=grayscale
@@ -913,8 +993,17 @@ def main():
     parser.add_argument('--grayscale', action='store_true', help='是否使用灰度渲染，默认：False')
     parser.add_argument('--device', choices=['auto', 'gpu', 'cpu'], default='auto',
                        help='推理设备: auto(自动检测), gpu(强制GPU), cpu(强制CPU)，默认 auto')
+    parser.add_argument('-of', '--output-formats',
+                       type=str,
+                       default='markdown,json,img,pdf',
+                       help='输出格式 (逗号分隔). 可选值: markdown, json, img, pdf. '
+                            '默认全部输出. 提示: pp-ocrv6 不支持 markdown, 将自动跳过. '
+                            '示例: -of markdown,json')
     
     args = parser.parse_args()
+    
+    # 解析输出格式
+    output_formats = [fmt.strip() for fmt in args.output_formats.split(',') if fmt.strip()]
     
     # 设置日志级别
     log_level = LOG_LEVELS[args.log_level]
@@ -941,6 +1030,7 @@ def main():
             device=args.device,
             lang=args.lang,
             model_size=args.model_size,
+            output_formats=output_formats,
             optimize_pdf=args.optimize_pdf,
             optimize_level=args.optimize_level,
             grayscale=args.grayscale
@@ -958,6 +1048,7 @@ def main():
                 device=args.device,
                 lang=args.lang,
                 model_size=args.model_size,
+                output_formats=output_formats,
                 optimize_pdf=args.optimize_pdf,
                 optimize_level=args.optimize_level,
                 grayscale=args.grayscale
@@ -970,6 +1061,7 @@ def main():
                 device=args.device,
                 lang=args.lang,
                 model_size=args.model_size,
+                output_formats=output_formats,
                 optimize_pdf=args.optimize_pdf,
                 optimize_level=args.optimize_level,
                 grayscale=args.grayscale
