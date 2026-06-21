@@ -33,9 +33,32 @@ _HANDLER_CACHE: dict[tuple, "PDFOCRHandler"] = {}
 _HANDLER_LOCKS: dict[tuple, asyncio.Lock] = {}
 
 # ---------------------------------------------------------------------------
-# 输出格式常量
+# 支持的模型列表（模块级常量，供测试与端点共用）
 # ---------------------------------------------------------------------------
-VALID_OUTPUT_FORMATS = ["markdown", "json", "img", "pdf"]
+VALID_MODELS = ["paddleocr-vl", "pp-ocrv6", "pp-structurev3"]
+# 兼容旧版测试导入（tests/api_device_test.py 从 api 模块导入 valid_models）
+valid_models = VALID_MODELS
+
+# ---------------------------------------------------------------------------
+# 输出格式常量 & 校验（优先从 routers/ 模块导入）
+# ---------------------------------------------------------------------------
+try:
+    from routers.output_format import VALID_OUTPUT_FORMATS, validate_output_formats
+except ImportError:
+    # 回退：模块未就绪时使用行内定义
+    VALID_OUTPUT_FORMATS = ["markdown", "json", "img", "pdf"]
+
+    def validate_output_formats(raw: Optional[str]) -> Optional[list[str]]:
+        if not raw:
+            return None
+        formats = [f.strip() for f in raw.split(",") if f.strip()]
+        invalid = set(formats) - set(VALID_OUTPUT_FORMATS)
+        if invalid:
+            raise ValueError(
+                f"无效的输出格式: {', '.join(sorted(invalid))}。"
+                f" 可选: {', '.join(VALID_OUTPUT_FORMATS)}"
+            )
+        return formats if formats else None
 
 
 def _cleanup_expired_dirs():
@@ -293,9 +316,8 @@ async def ocr_pdf(
         raise HTTPException(status_code=400, detail="文件类型错误，请上传PDF文件")
     
     # 验证模型选择
-    valid_models = ["pp-ocrv6", "pp-ocrv5", "pp-structurev3", "paddleocr-vl", "pp-chatocrv4"]
-    if model not in valid_models:
-        raise HTTPException(status_code=400, detail=f"模型选择错误，请选择以下模型之一: {', '.join(valid_models)}")
+    if model not in VALID_MODELS:
+        raise HTTPException(status_code=400, detail=f"模型选择错误，请选择以下模型之一: {', '.join(VALID_MODELS)}")
     
     # 验证优化级别
     valid_optimize_levels = ["low", "medium", "high"]
@@ -308,15 +330,10 @@ async def ocr_pdf(
         raise HTTPException(status_code=400, detail=f"设备参数错误，请选择以下之一: {', '.join(valid_devices)}")
     
     # 验证输出格式
-    formats_list = None
-    if output_formats:
-        formats_list = [f.strip() for f in output_formats.split(',') if f.strip()]
-        invalid = set(formats_list) - set(VALID_OUTPUT_FORMATS)
-        if invalid:
-            raise HTTPException(
-                status_code=400,
-                detail=f"无效的输出格式: {', '.join(sorted(invalid))}。可选: {', '.join(VALID_OUTPUT_FORMATS)}"
-            )
+    try:
+        formats_list = validate_output_formats(output_formats)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     
     try:
         # 惰性清理过期输出目录
@@ -415,6 +432,132 @@ async def ocr_pdf(
         import traceback
         logger.debug(f"完整错误堆栈: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"处理PDF文件时发生错误: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# 批量上传端点: 同时处理多个 PDF 文件
+# ---------------------------------------------------------------------------
+@app.post("/upload")
+async def upload_pdfs(
+    files: list[UploadFile] = File(...),
+    model: Optional[str] = Form(default="pp-ocrv6"),
+    device: Optional[str] = Form(default="auto"),
+    lang: Optional[str] = Form(default="ch"),
+    model_size: Optional[str] = Form(default="medium"),
+    optimize_pdf: Optional[bool] = Form(default=False),
+    optimize_level: Optional[str] = Form(default="medium"),
+    grayscale: Optional[bool] = Form(default=False),
+    output_formats: Optional[str] = Form(default="markdown,json,img,pdf"),
+):
+    """批量上传 PDF 文件并逐一进行 OCR 识别
+
+    与 /ocr/pdf 使用相同的 handler 缓存，所以首次请求后后续请求不会重复初始化模型。
+    每个文件独立处理，一个文件的失败不影响其他文件。
+    """
+    # 验证参数
+    if model not in VALID_MODELS:
+        raise HTTPException(status_code=400, detail=f"模型选择错误，请选择以下模型之一: {', '.join(VALID_MODELS)}")
+
+    valid_optimize_levels = ["low", "medium", "high"]
+    if optimize_level not in valid_optimize_levels:
+        raise HTTPException(status_code=400, detail=f"优化级别选择错误: {', '.join(valid_optimize_levels)}")
+
+    valid_devices = ["auto", "gpu", "cpu"]
+    if device not in valid_devices:
+        raise HTTPException(status_code=400, detail=f"设备参数错误: {', '.join(valid_devices)}")
+
+    try:
+        formats_list = validate_output_formats(output_formats)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not files:
+        raise HTTPException(status_code=400, detail="请至少上传一个 PDF 文件")
+
+    # 过滤非 PDF 文件
+    pdf_files = [f for f in files if f.filename and f.filename.lower().endswith('.pdf')]
+    if not pdf_files:
+        raise HTTPException(status_code=400, detail="上传的文件中没有 PDF 文件")
+
+    # 惰性清理过期输出目录
+    _cleanup_expired_dirs()
+
+    # 创建批次请求目录
+    batch_id = str(uuid.uuid4())[:8]
+    batch_dir = os.path.join(API_OUTPUT_BASE, f"batch_{batch_id}")
+    os.makedirs(batch_dir, exist_ok=True)
+
+    # 获取或创建 handler
+    output_dir = os.path.join(batch_dir, "output")
+    os.makedirs(output_dir, exist_ok=True)
+
+    logger.info(f"批量上传: 共 {len(pdf_files)} 个 PDF 文件, 模型={model}")
+    ocr_handler = get_handler(
+        output_dir, model,
+        device=device, lang=lang, model_size=model_size,
+        output_formats=formats_list,
+        optimize_pdf=optimize_pdf,
+        optimize_level=optimize_level,
+        grayscale=grayscale,
+    )
+
+    results = []
+    lock = _HANDLER_LOCKS.setdefault(
+        (model, device, lang, model_size,
+         tuple(formats_list) if formats_list else tuple(),
+         optimize_pdf, optimize_level, grayscale),
+        asyncio.Lock(),
+    )
+
+    for pdf_file in pdf_files:
+        file_result = {
+            "filename": pdf_file.filename,
+            "status": "processing",
+            "error": None,
+            "outputs": {},
+        }
+        try:
+            # 保存到批次目录
+            pdf_path = os.path.join(batch_dir, pdf_file.filename)
+            content = await pdf_file.read()
+            with open(pdf_path, "wb") as f:
+                f.write(content)
+
+            # 处理
+            async with lock:
+                success = ocr_handler.process_pdf(pdf_path)
+
+            if not success:
+                file_result["status"] = "failed"
+                file_result["error"] = "处理失败"
+            else:
+                file_result["status"] = "success"
+                # 扫描输出
+                base = os.path.splitext(pdf_file.filename)[0]
+                for f_name in sorted(os.listdir(output_dir)):
+                    if f_name.startswith(base):
+                        ext = os.path.splitext(f_name)[1].lower()
+                        f_path = os.path.join(output_dir, f_name).replace(os.sep, '/')
+                        file_result["outputs"][ext] = f_path
+        except Exception as e:
+            file_result["status"] = "error"
+            file_result["error"] = str(e)
+            logger.error(f"处理 {pdf_file.filename} 失败: {e}")
+
+        results.append(file_result)
+
+    device_info = detect_device(device if device != "auto" else None)
+    return JSONResponse(content={
+        "status": "completed",
+        "batch_id": batch_id,
+        "total": len(pdf_files),
+        "success_count": sum(1 for r in results if r["status"] == "success"),
+        "failed_count": sum(1 for r in results if r["status"] in ("failed", "error")),
+        "device": device,
+        "device_info": device_info,
+        "results": results,
+    })
+
 
 # ---------------------------------------------------------------------------
 # 下载端点: 提供 OCR 输出文件的直接下载
