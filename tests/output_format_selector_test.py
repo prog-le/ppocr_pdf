@@ -23,34 +23,36 @@ from ocr_pdf import PDFOCRHandler
 
 @pytest.fixture(scope="module")
 def two_page_pdf(tmp_path_factory):
-    """生成 2 页真实 PDF 文件供测试"""
-    import pypdfium2 as pdfium
+    """生成 2 页真实 PDF 文件供测试 (使用 pikepdf 创建)"""
+    import pikepdf
 
     pdf_path = tmp_path_factory.mktemp("inputs") / "test.pdf"
-    lib = pdfium.PdfLibrary()
-    doc = lib.new_doc()
+    pdf = pikepdf.Pdf.new()
 
     for i in range(2):
-        page = doc.new_page(612, 792)  # letter size
-        page.set_font_size(14)
-        page.set_fill(0)
-        page.draw_text(f"This is test page {i+1}.", 72, 700)
+        pdf.add_blank_page(page_size=(612, 792))  # letter size
 
-    doc.save(pdf_path.__str__())
-    doc.close()
-    lib.close()
+    # 添加简单文字内容到每页
+    for i, page in enumerate(pdf.pages):
+        content = (
+            f"BT "
+            f"/F1 14 Tf "
+            f"72 700 Td "
+            f"(This is test page {i+1}.) Tj "
+            f"ET"
+        )
+        page.Contents = pdf.make_stream(content.encode())
+
+    pdf.save(pdf_path)
+    pdf.close()
     return pdf_path
 
 
 def get_page_count(pdf_path):
     """返回 PDF 页数"""
     import pypdfium2 as pdfium
-    lib = pdfium.PdfLibrary()
-    doc = lib.open_document(pdf_path.__str__())
-    count = doc.get_page_count()
-    doc.close()
-    lib.close()
-    return count
+    with pdfium.PdfDocument(pdf_path) as doc:
+        return len(doc)
 
 
 def _create_handler(output_dir, model='paddleocr-vl', output_formats=None, **kwargs):
