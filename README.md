@@ -190,7 +190,7 @@ python download_models.py -m pp-ocrv5
 ### 命令行参数
 
 ```bash
-python ocr_pdf.py [-h] -i INPUT -o OUTPUT [-m {manual,daemon}] [-model {paddleocr-vl,pp-ocrv5,pp-structurev3,pp-chatocrv4}] [-l {debug,info,warning,error,critical}] [--optimize-pdf] [--optimize-level {low,medium,high}] [--grayscale]
+python ocr_pdf.py [-h] -i INPUT -o OUTPUT [-m {manual,daemon}] [-model {paddleocr-vl,pp-ocrv6,pp-ocrv5,pp-structurev3,pp-chatocrv4}] [-l {debug,info,warning,error,critical}] [--optimize-pdf] [--optimize-level {low,medium,high}] [--grayscale] [-of OUTPUT_FORMATS]
 ```
 
 参数说明：
@@ -203,18 +203,20 @@ python ocr_pdf.py [-h] -i INPUT -o OUTPUT [-m {manual,daemon}] [-model {paddleoc
 - `--optimize-pdf`: 是否优化PDF文件，默认：False
 - `--optimize-level`: PDF优化级别，可选值：low、medium、high，默认：medium
 - `--grayscale`: 是否使用灰度渲染，减少内存占用，默认：False
+- `-of, --output-formats`: 输出格式 (逗号分隔)，可选值：markdown、json、img、pdf，默认：markdown,json,img,pdf
 - `-h, --help`: 显示帮助信息
 
 ### 模型选择说明
 
 程序提供四种PaddleOCR模型供选择，每种模型有其特定的适用场景：
 
-| 模型名称       | 模型类型     | 特点                                                                      | 适用场景                                     | 支持状态                     |
-| -------------- | ------------ | ------------------------------------------------------------------------- | -------------------------------------------- | ---------------------------- |
-| paddleocr-vl   | 多模态模型   | 通过0.9B超紧凑视觉语言模型增强，支持109种语言，在复杂元素识别方面表现出色 | 多语言混合文档、包含表格/公式/图表的复杂文档 | ✅ 支持                      |
-| pp-ocrv5       | 全场景识别   | 单模型支持五种文字类型，精度提升13个百分点，资源消耗较低                  | 普通文档识别、日常使用                       | ✅ 支持                      |
-| pp-structurev3 | 复杂文档解析 | 将复杂PDF转换为保留原始结构的Markdown和JSON文件，保持文档版式和层次结构   | 结构化文档处理、需要保留格式的文档           | ✅ 支持（需额外依赖）        |
-| pp-chatocrv4   | 智能信息抽取 | 原生集成ERNIE 4.5，从海量文档中精准提取关键信息，精度提升15个百分点       | 信息抽取、文档问答、关键信息提取             | ⚠️ 需API密钥，暂不直接支持 |
+| 模型名称       | 模型类型     | 特点                                                                      | 适用场景                                     | 支持状态                     | 输出格式兼容性                                            |
+| -------------- | ------------ | ------------------------------------------------------------------------- | -------------------------------------------- | ---------------------------- | --------------------------------------------------------- |
+| paddleocr-vl   | 多模态模型   | 通过0.9B超紧凑视觉语言模型增强，支持109种语言，在复杂元素识别方面表现出色 | 多语言混合文档、包含表格/公式/图表的复杂文档 | ✅ 支持                      | json ✅, markdown ✅, img ✅, pdf ✅                      |
+| pp-ocrv6       | 全场景识别   | 通用文字识别，支持50种语言，资源消耗较低                                   | 普通文档识别、日常使用                       | ✅ 支持                      | json ✅, markdown ❌, img ✅, pdf ✅                      |
+| pp-ocrv5       | 全场景识别   | 单模型支持五种文字类型，精度提升13个百分点，资源消耗较低                  | 普通文档识别、日常使用                       | ✅ 支持                      | json ✅, markdown ❌ (遗留), img ✅, pdf ✅                |
+| pp-structurev3 | 复杂文档解析 | 将复杂PDF转换为保留原始结构的Markdown和JSON文件，保持文档版式和层次结构   | 结构化文档处理、需要保留格式的文档           | ✅ 支持（需额外依赖）        | json ✅, markdown ✅, img ✅, pdf ✅                      |
+| pp-chatocrv4   | 智能信息抽取 | 原生集成ERNIE 4.5，从海量文档中精准提取关键信息，精度提升15个百分点       | 信息抽取、文档问答、关键信息提取             | ⚠️ 需API密钥，暂不直接支持 | json ✅, markdown ❌, img ❌, pdf ❌                      |
 
 **注意：**
 - pp-structurev3模型需要安装额外依赖：`pip install "paddlex[ocr]"`
@@ -255,6 +257,12 @@ python ocr_pdf.py -i ./test_input -o ./test_output -m manual --grayscale
 python ocr_pdf.py -i ./test_input -o ./test_output -m manual --optimize-pdf --grayscale
 
 # pp-chatocrv4模型需要配置API密钥，目前暂不直接支持
+
+# 仅输出纯文本 + JSON
+python ocr_pdf.py -i ./test_input -o ./test_output -m manual -of json
+
+# 输出纯文本 + Markdown + 标注图片
+python ocr_pdf.py -i ./test_input -o ./test_output -m manual -of markdown,img
 ```
 
 #### 2. 守护模式
@@ -275,21 +283,30 @@ python ocr_pdf.py -i ./test_input -o ./test_output -m daemon --optimize-pdf
 python ocr_pdf.py -i ./test_input -o ./test_output -m daemon --grayscale
 ```
 
-### 输出结果
+### 输出结果与格式选择
 
-识别结果会以文本文件的形式保存到指定的输出目录中，文件名与原PDF文件相同，但扩展名为 `.txt`。识别结果按页面组织，每页内容以 `=== 第 X 页 ===`分隔。
+识别结果始终以 `.txt` 格式保存到输出目录。此外，可通过 `-of`/`--output-formats` 参数选择额外的输出格式：
 
-示例输出：
+| 格式 | 参数值 | 扩展名 | 说明 | 兼容性 |
+|------|--------|--------|------|--------|
+| 纯文本 | — | `.txt` | 始终生成, 按页面组织, 用 `=== 第 X 页 ===` 分隔 | 全部模型 |
+| JSON | `json` | `.json` | 结构化数据, 含检测框/置信度/识别文本 | 全部模型 |
+| Markdown | `markdown` | `.md` | 保留标题/表格/公式结构, 可直接转 HTML/DOCX | paddleocr-vl, pp-structurev3 |
+| 标注图片 | `img` | `_p{nnn}.png` | 检测框 + 文字可视化, 用于 debug / 校对 | 全部模型 |
+| 标注 PDF | `pdf` | `_annotated.pdf` | 标注覆盖在页面上的 PDF, 用于存档 / 批注 | 全部模型 (依赖 img2pdf) |
+
+**示例输出 (默认 `-of markdown,json,img,pdf`):**
 
 ```
-=== 第 1 页 ===
-Hello World!
-This is a test PDF file for OCR.
-Page 1 content.
-=== 第 2 页 ===
-This is page 2.
-More test content here.
+./output/doc.txt           # 纯文本 (始终生成)
+./output/doc.md            # Markdown 结构化文本
+./output/doc.json          # JSON 结构化数据
+./output/doc_p001.png      # 第 1 页标注图片
+./output/doc_p002.png      # 第 2 页标注图片
+./output/doc_annotated.pdf # 标注 PDF
 ```
+
+**注意:** `pp-ocrv6` 模型不支持 `markdown` 格式。如指定 `-of markdown` + `-model pp-ocrv6`, 程序将给出警告并跳过 .md 文件生成。
 
 ### 日志记录
 
@@ -357,15 +374,29 @@ POST /ocr/pdf
 **请求参数：**
 
 - `file`：上传的PDF文件
-- `model`：OCR模型选择（可选，默认：pp-ocrv5），可选值：pp-ocrv5, pp-structurev3, paddleocr-vl
+- `model`：OCR模型选择（可选，默认：pp-ocrv6），可选值：pp-ocrv6, pp-ocrv5, pp-structurev3, paddleocr-vl, pp-chatocrv4
+- `output_formats`：输出格式（可选，默认：`markdown,json,img,pdf`），逗号分隔，可选值：markdown, json, img, pdf
+- `lang`：语言（可选，默认：ch）
+- `model_size`：PP-OCRv6 模型尺寸（可选，默认：medium），可选值：medium, small, tiny
+- `optimize_pdf`：是否优化PDF（可选，默认：false）
+- `optimize_level`：PDF优化级别（可选，默认：medium），可选值：low, medium, high
+- `grayscale`：是否使用灰度渲染（可选，默认：false）
 
 **示例请求（curl）：**
 
 ```bash
+# 基本 OCR 请求
 curl -X POST "http://localhost:8000/ocr/pdf" \
   -H "Content-Type: multipart/form-data" \
   -F "file=@test.pdf" \
-  -F "model=pp-structurev3"
+  -F "model=pp-structurev3" \
+  -F "output_formats=markdown,json"
+
+# 仅输出 JSON 格式数据
+curl -X POST "http://localhost:8000/ocr/pdf" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@test.pdf" \
+  -F "output_formats=json"
 ```
 
 **示例响应：**
@@ -375,29 +406,81 @@ curl -X POST "http://localhost:8000/ocr/pdf" \
   "status": "success",
   "filename": "test.pdf",
   "model": "pp-structurev3",
-  "result": "=== 第 1 页 ===\nHello World!\nThis is a test PDF file for OCR.\nPage 1 content.\n=== 第 2 页 ===\nThis is page 2.\nMore test content here."
+  "lang": "ch",
+  "model_size": "medium",
+  "device": "auto",
+  "device_info": { "device": "cpu", "device_type": "cpu" },
+  "request_id": "uuid-xxxx",
+  "outputs": {
+    "txt": "api_outputs/20260122/xxxx/output/test.txt",
+    "md": "api_outputs/20260122/xxxx/output/test.md",
+    "json": "api_outputs/20260122/xxxx/output/test.json",
+    "img": ["api_outputs/20260122/xxxx/output/test_p001.png"],
+    "pdf": "api_outputs/20260122/xxxx/output/test_annotated.pdf"
+  },
+  "result": "=== 第 1 页 ===\nHello World!\n..."
 }
+```
+
+##### 3. 批量上传
+
+```
+POST /upload
+```
+
+支持同时上传多个 PDF 文件进行 OCR 识别，参数与 `/ocr/pdf` 一致。
+
+```bash
+curl -X POST "http://localhost:8000/upload" \
+  -H "Content-Type: multipart/form-data" \
+  -F "files=@doc1.pdf" \
+  -F "files=@doc2.pdf" \
+  -F "model=pp-ocrv6"
+```
+
+##### 4. 下载输出文件
+
+```
+GET /download/{path}
+```
+
+通过 `/ocr/pdf` 或 `/upload` 返回的 `outputs` 字段中的路径，可直接下载生成的输出文件：
+
+```bash
+# 下载标注 PDF
+curl -o annotated.pdf http://localhost:8000/download/api_outputs/20260122/xxxx/output/test_annotated.pdf
+
+# 下载 JSON 结果
+curl -o result.json http://localhost:8000/download/api_outputs/20260122/xxxx/output/test.json
 ```
 
 ## 项目结构
 
 ```
 paddleocr-pdf/
-├── ocr_pdf.py          # 主程序文件
-├── api.py              # API服务模块
-├── download_models.py  # 模型下载脚本
-├── ocr_logs.md         # OCR识别日志(自动生成)
-├── test_input/         # 测试输入目录
-│   └── 01.pdf          # 测试PDF文件
-├── test_output/        # 测试输出目录
-│   └── 01.txt          # 识别结果文件
-├── logs/               # 日志文件目录(自动生成)
-├── .paddlex/           # 模型缓存目录(自动生成)
-├── requirements.txt    # 依赖项列表
-├── Dockerfile          # Docker构建文件
-├── .dockerignore       # Docker忽略配置
-├── .gitignore          # Git忽略配置
-└── README.md           # 项目说明文档
+├── ocr_pdf.py               # 主程序文件
+├── api.py                   # API服务模块
+├── download_models.py       # 模型下载脚本
+├── pytest.ini               # Pytest 配置
+├── ocr_logs.md              # OCR识别日志(自动生成)
+├── test_input/              # 测试输入目录
+│   └── 01.pdf               # 测试PDF文件
+├── test_output/             # 测试输出目录
+│   └── 01.txt               # 识别结果文件
+├── api_outputs/             # API 输出文件目录(自动生成)
+├── tests/                   # 测试目录
+│   ├── output_format_selector_test.py  # 输出格式测试
+│   ├── download_models_v6_test.py      # 模型下载测试
+│   └── download_models_device_test.py  # 设备检测测试
+├── routers/                 # API 路由模块
+│   └── output_format.py     # 输出格式校验逻辑
+├── logs/                    # 日志文件目录(自动生成)
+├── .paddlex/                # 模型缓存目录(自动生成)
+├── requirements.txt         # 依赖项列表
+├── Dockerfile               # Docker构建文件
+├── .dockerignore            # Docker忽略配置
+├── .gitignore               # Git忽略配置
+└── README.md                # 项目说明文档
 ```
 
 ## 配置方法
@@ -532,6 +615,19 @@ OCR识别速度受多种因素影响，包括PDF文件大小、页数、图像�
 - 电子邮件：prog.le@outlook.com
 
 ## 更新日志
+
+### v1.0.3 (2026-06-22)
+
+- 新增 `-of`/`--output-formats` CLI 参数，支持选择输出格式：markdown, json, img, pdf
+- 新增 `output_formats` API 表单参数，支持通过 API 控制输出格式
+- 新增 `GET /download/{path}` API 端点，提供输出文件的直接下载
+- 新增 `POST /upload` 批量上传端点
+- 提取输出格式校验逻辑到 `routers/output_format.py` 独立模块
+- `.txt` 格式始终生成，确保向后兼容
+- 新增 `tests/output_format_selector_test.py` 集成测试（9个测试用例）
+- 添加 `img2pdf` 依赖，用于标注 PDF 打包
+- 新增 `pytest.ini` 配置，定义 `integration` 测试标记
+- 更新项目文档，补充输出格式相关说明和示例
 
 ### v1.0.2 (2026-01-22)
 
