@@ -34,3 +34,8 @@ env/
 *.zip
 *.tar.gz
 *.rar
+
+# 忽略工具生成的目录
+thoughts/
+.superpowers/
+api_outputs/
