@@ -36,6 +36,7 @@ env/
 *.rar
 
 # 忽略工具生成的目录
+imgs/
 thoughts/
 .superpowers/
 api_outputs/

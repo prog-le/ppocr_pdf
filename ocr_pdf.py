@@ -338,7 +338,8 @@ class PDFOCRHandler:
         file_size = 0
         file_size_mb = 0  # 初始化文件大小变量，避免NameError
         total_pages = 0
-        output_txt_path = None
+        pdf_output_dir = None
+        output_path_str = "N/A"
         
         try:
             # 获取文件大小
@@ -350,7 +351,14 @@ class PDFOCRHandler:
             
             # 获取文件名（不含扩展名）
             filename = os.path.splitext(os.path.basename(pdf_path))[0]
-            output_txt_path = os.path.join(self.output_dir, f"{filename}.txt")
+            # MinerU 风格输出目录结构:
+            #   {output_dir}/{filename}/
+            #     images/page_N.jpg
+            #     output.md
+            #     layout.pdf
+            pdf_output_dir = os.path.join(self.output_dir, filename)
+            images_dir = os.path.join(pdf_output_dir, "images")
+            os.makedirs(images_dir, exist_ok=True)
             
             # 优化PDF文件
             if self.optimize_pdf_flag:
@@ -667,6 +675,13 @@ class PDFOCRHandler:
                     ocr_results.append(f"=== 第 {page_num + 1} 页 ===")
                     ocr_results.extend(page_text)
                     
+                    # 保存页面图像为低质量 JPG（用于 output.md 和 layout.pdf）
+                    try:
+                        jpg_path = os.path.join(images_dir, f"page_{page_num + 1}.jpg")
+                        cv2.imwrite(jpg_path, img_cv, [cv2.IMWRITE_JPEG_QUALITY, 50])
+                    except Exception as e:
+                        logger.warning(f"保存第 {page_num + 1} 页图像失败: {e}")
+                    
                     # 释放当前页的资源，避免内存泄漏
                     del img_cv, img
                     if 'bitmap' in locals():
@@ -687,71 +702,20 @@ class PDFOCRHandler:
                     # 继续处理下一页，而不是整个文件失败
                     continue
             
-            # 保存识别结果（即使部分页面处理失败）
+            # MinerU 风格输出（即使部分页面处理失败）
             if ocr_results:
-                with open(output_txt_path, 'w', encoding='utf-8') as f:
-                    f.write('\n'.join(ocr_results))
-                logger.info(f"PDF文件处理完成，结果保存至: {output_txt_path}")
-                # === 新增: 可选输出格式 (output_formats) ===
-                if self.output_formats and page_raw_results:
-                    import glob as glob_module
-                    
-                    for page_idx, page_res_list in enumerate(page_raw_results):
-                        page_num = page_idx + 1
-                        
-                        for res in page_res_list:
-                            # JSON: 所有模型都支持
-                            if 'json' in self.output_formats:
-                                try:
-                                    json_path = os.path.join(self.output_dir, f"{filename}.json")
-                                    res.save_to_json(json_path)
-                                except AttributeError:
-                                    try:
-                                        import json as json_module
-                                        json_path = os.path.join(self.output_dir, f"{filename}.json")
-                                        with open(json_path, 'w', encoding='utf-8') as jf:
-                                            json_module.dump({"text": ocr_results}, jf, ensure_ascii=False, indent=2)
-                                    except Exception as e2:
-                                        logger.error(f"保存 JSON 失败: {e2}")
-                                except Exception as e:
-                                    logger.error(f"保存 JSON 失败: {e}")
-                            
-                            # Markdown: 仅结构类模型支持 (pp-ocrv6 跳过)
-                            if 'markdown' in self.output_formats:
-                                if hasattr(res, 'save_to_markdown') and self.model != 'pp-ocrv6':
-                                    try:
-                                        md_path = os.path.join(self.output_dir, f"{filename}.md")
-                                        res.save_to_markdown(md_path)
-                                    except Exception as e:
-                                        logger.error(f"保存 Markdown 失败: {e}")
-                                elif self.model == 'pp-ocrv6':
-                                    logger.warning(f"pp-ocrv6 不支持 markdown 输出, 已跳过")
-                            
-                            # Annotated Image: 所有模型都支持
-                            if 'img' in self.output_formats:
-                                try:
-                                    img_path = os.path.join(self.output_dir, f"{filename}_p{page_num:03d}.png")
-                                    if hasattr(res, 'save_to_img'):
-                                        res.save_to_img(img_path)
-                                except Exception as e:
-                                    logger.error(f"保存标注图片失败: {e}")
-                    
-                    # PDF (annotated layout PDF): 收集所有 PNG, 打包为单 PDF
-                    if 'pdf' in self.output_formats:
-                        try:
-                            import img2pdf
-                            png_files = sorted(
-                                glob_module.glob(os.path.join(self.output_dir, f"{filename}_p*.png"))
-                            )
-                            if png_files:
-                                pdf_path = os.path.join(self.output_dir, f"{filename}_annotated.pdf")
-                                with open(pdf_path, 'wb') as f:
-                                    f.write(img2pdf.convert([str(p) for p in png_files]))
-                                logger.info(f"标注 PDF 已生成: {pdf_path}")
-                        except ImportError:
-                            logger.error("缺少 img2pdf, 请执行: pip install img2pdf")
-                        except Exception as e:
-                            logger.error(f"生成标注 PDF 失败: {e}")
+                # 1) output.md — 每页一张图片引用，后接 OCR 文本
+                md_path = os.path.join(pdf_output_dir, "output.md")
+                self._build_markdown(ocr_results, images_dir, md_path, total_pages)
+                logger.info(f"output.md 已生成: {md_path}")
+                
+                # 2) layout.pdf — 彩色标注框叠加 PDF
+                pdf_path = os.path.join(pdf_output_dir, "layout.pdf")
+                self._create_layout_pdf(images_dir, page_raw_results, pdf_path, total_pages)
+                if os.path.exists(pdf_path):
+                    logger.info(f"layout.pdf 已生成: {pdf_path}")
+                
+                logger.info(f"PDF 文件处理完成: {pdf_output_dir}")
                 success = True
                 return True
             else:
@@ -779,7 +743,7 @@ class PDFOCRHandler:
             logger.info(f"总页数: {total_pages}")
             logger.info(f"处理耗时: {elapsed_time:.2f}秒")
             logger.info(f"处理结果: {'成功' if success else '失败'}")
-            logger.info(f"输出路径: {output_txt_path if success else 'N/A'}")
+            logger.info(f"输出路径: {pdf_output_dir if success else 'N/A'}")
             logger.info("=" * 50)
             
             # 将日志内容以表格形式输出到本地md文件
@@ -799,7 +763,7 @@ class PDFOCRHandler:
             pages_str = str(total_pages)
             elapsed_str = f"{elapsed_time:.2f}秒"
             result_str = "成功" if success else "失败"
-            output_path_str = output_txt_path if success else "N/A"
+            output_path_str = pdf_output_dir if success else "N/A"
             
             # 生成Markdown表格行
             log_row = f"| {log_time} | {file_name} | {file_size_str} | {pages_str} | {elapsed_str} | {result_str} | {output_path_str} |\n"
@@ -809,6 +773,126 @@ class PDFOCRHandler:
                 f.write(log_row)
             
             logger.info(f"日志已记录到Markdown文件: {log_md_path}")
+
+    # ------------------------------------------------------------------
+    # MinerU 风格输出辅助方法
+    # ------------------------------------------------------------------
+
+    def _build_markdown(self, ocr_results, images_dir, md_path, total_pages):
+        """构建 output.md：每页一张图片引用 + OCR 文本"""
+        lines = []
+        for page_num in range(total_pages):
+            lines.append(f"![page_{page_num + 1}](images/page_{page_num + 1}.jpg)")
+            lines.append("")
+        # OCR 文本内容
+        if ocr_results:
+            lines.append("---")
+            lines.append("")
+            lines.extend(ocr_results)
+        with open(md_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines))
+
+    def _create_layout_pdf(self, images_dir, page_raw_results, pdf_path, total_pages):
+        """创建带彩色标注框的 layout.pdf（MinerU 风格）
+        
+        颜色方案（参考 MinerU）:
+            text    → 蓝   (255, 0, 0)
+            title   → 红   (0, 0, 255)
+            table   → 绿   (0, 255, 0)
+            figure  → 橙   (0, 165, 255)
+            formula → 紫   (128, 0, 128)
+            default → 浅蓝 (200, 150, 50)
+        """
+        annotated_paths = []
+        
+        for page_idx in range(total_pages):
+            jpg_path = os.path.join(images_dir, f"page_{page_idx + 1}.jpg")
+            if not os.path.exists(jpg_path):
+                continue
+            
+            img = cv2.imread(jpg_path)
+            if img is None:
+                continue
+            
+            # 获取当前页的检测结果
+            if page_idx < len(page_raw_results):
+                for res in page_raw_results[page_idx]:
+                    self._draw_detection(img, res)
+            
+            # 保存标注图像
+            annotated_path = os.path.join(images_dir, f"page_{page_idx + 1}_layout.jpg")
+            cv2.imwrite(annotated_path, img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            annotated_paths.append(annotated_path)
+        
+        # 组装 PDF
+        if annotated_paths:
+            try:
+                import img2pdf
+                with open(pdf_path, 'wb') as f:
+                    f.write(img2pdf.convert([str(p) for p in annotated_paths]))
+                # 清理临时标注图
+                for p in annotated_paths:
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        pass
+            except ImportError:
+                logger.error("缺少 img2pdf, layout.pdf 未生成。请执行: pip install img2pdf")
+            except Exception as e:
+                logger.error(f"生成 layout.pdf 失败: {e}")
+
+    def _draw_detection(self, img, res):
+        """在图像上绘制单个检测结果的标注框"""
+        try:
+            boxes = []
+            label = None
+            color = (200, 150, 50)  # default: 浅蓝/棕
+
+            # --- 结构模型格式 (PP-StructureV3 / PaddleOCR-VL) ---
+            if hasattr(res, 'res'):
+                for item in res.res:
+                    if isinstance(item, dict) and 'bbox' in item:
+                        bbox = item['bbox']  # [x1, y1, x2, y2]
+                        x1, y1, x2, y2 = map(int, bbox[:4])
+                        box_pts = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+                        boxes.append(box_pts)
+                        item_type = item.get('type', 'text')
+                        color = {
+                            'text': (255, 0, 0),      # 蓝
+                            'title': (0, 0, 255),     # 红
+                            'table': (0, 255, 0),     # 绿
+                            'figure': (0, 165, 255),  # 橙
+                            'formula': (128, 0, 128), # 紫
+                            'header': (255, 255, 0),  # 青
+                            'footer': (255, 255, 0),  # 青
+                        }.get(item_type, (200, 150, 50))
+                        label = str(item.get('text', ''))
+
+            # --- pp-ocrv5 格式: [box_coords, (text, conf)] ---
+            elif isinstance(res, (list, tuple)) and len(res) >= 2:
+                box_coords = res[0]
+                text_info = res[1]
+                if (isinstance(box_coords, (list, tuple)) and len(box_coords) == 4
+                        and all(isinstance(pt, (list, tuple)) and len(pt) == 2 for pt in box_coords)):
+                    boxes.append(box_coords)
+                    color = (255, 0, 0)  # 蓝 = text
+                    if isinstance(text_info, (list, tuple)) and len(text_info) > 0:
+                        label = str(text_info[0])
+
+            # 绘制所有框
+            for box in boxes:
+                pts = np.array(box, dtype=np.int32).reshape((-1, 1, 2))
+                cv2.polylines(img, [pts], isClosed=True, color=color, thickness=2)
+                if label:
+                    # 半透明背景 + 文字
+                    text_x, text_y = box[0]
+                    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                    cv2.rectangle(img, (text_x, text_y - th - 4),
+                                  (text_x + tw, text_y), color, -1)
+                    cv2.putText(img, label, (text_x, text_y - 2),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        except Exception:
+            pass  # 单条检测绘制失败不影响整体
 
 class PDFFileHandler(FileSystemEventHandler):
     """监控目录中的新PDF文件（同步处理）"""

@@ -291,8 +291,8 @@ async def ocr_pdf(
     optimize_level: Optional[str] = Form(default="medium", description="PDF优化级别: low, medium, high"),
     grayscale: Optional[bool] = Form(default=False, description="是否使用灰度渲染"),
     output_formats: Optional[str] = Form(
-        default="markdown,json,img,pdf",
-        description="输出格式 (逗号分隔). 可选值: markdown, json, img, pdf"
+        default=None,
+        description="(已废弃) 输出始终为 MinerU 风格: {stem}/images/page_N.jpg + output.md + layout.pdf"
     ),
 ):
     """
@@ -306,7 +306,7 @@ async def ocr_pdf(
         optimize_pdf: 是否优化PDF
         optimize_level: PDF优化级别，可选值: low, medium, high
         grayscale: 是否使用灰度渲染
-        output_formats: 输出格式 (逗号分隔). 可选值: markdown, json, img, pdf
+        output_formats: (已废弃) 保留以兼容旧调用方, 不再生效
 
     Returns:
         识别结果
@@ -380,28 +380,31 @@ async def ocr_pdf(
         if not success:
             raise HTTPException(status_code=500, detail="PDF文件处理失败")
         
-        # 扫描输出目录收集所有文件路径
+        # 扫描 MinerU 风格输出目录结构
+        stem = os.path.splitext(file.filename)[0]
+        pdf_output_dir = os.path.join(output_dir, stem)
         outputs = {}
-        if os.path.exists(output_dir):
-            for f_name in sorted(os.listdir(output_dir)):
-                ext = os.path.splitext(f_name)[1].lower()
-                f_path = os.path.join(output_dir, f_name).replace(os.sep, '/')
-                if ext == '.txt':
-                    outputs["txt"] = f_path
-                elif ext == '.md':
-                    outputs["md"] = f_path
-                elif ext == '.json':
-                    outputs["json"] = f_path
-                elif ext == '.png':
-                    outputs.setdefault("img", []).append(f_path)
-                elif ext == '.pdf' and '_annotated' in f_name:
-                    outputs["pdf"] = f_path
+        md_path = ""
+        layout_path = ""
+        images_dir = ""
+        if os.path.exists(pdf_output_dir):
+            md_path = os.path.join(pdf_output_dir, "output.md")
+            if os.path.exists(md_path):
+                outputs["md"] = md_path.replace(os.sep, '/')
+            layout_path = os.path.join(pdf_output_dir, "layout.pdf")
+            if os.path.exists(layout_path):
+                outputs["layout_pdf"] = layout_path.replace(os.sep, '/')
+            images_dir = os.path.join(pdf_output_dir, "images")
+            if os.path.exists(images_dir):
+                imgs = sorted(os.listdir(images_dir))
+                outputs["img"] = [
+                    os.path.join(images_dir, img).replace(os.sep, '/')
+                    for img in imgs
+                ]
         
-        # 读取识别结果 (txt 内容)
-        txt_filename = os.path.splitext(file.filename)[0] + ".txt"
-        txt_path = os.path.join(output_dir, txt_filename)
-        if os.path.exists(txt_path):
-            with open(txt_path, "r", encoding="utf-8") as f:
+        # 读取 Markdown 结果
+        if os.path.exists(md_path):
+            with open(md_path, "r", encoding="utf-8") as f:
                 ocr_result = f.read()
         else:
             ocr_result = ""
@@ -447,7 +450,7 @@ async def upload_pdfs(
     optimize_pdf: Optional[bool] = Form(default=False),
     optimize_level: Optional[str] = Form(default="medium"),
     grayscale: Optional[bool] = Form(default=False),
-    output_formats: Optional[str] = Form(default="markdown,json,img,pdf"),
+    output_formats: Optional[str] = Form(default=None, description="(已废弃) 不再生效"),
 ):
     """批量上传 PDF 文件并逐一进行 OCR 识别
 
@@ -532,13 +535,23 @@ async def upload_pdfs(
                 file_result["error"] = "处理失败"
             else:
                 file_result["status"] = "success"
-                # 扫描输出
-                base = os.path.splitext(pdf_file.filename)[0]
-                for f_name in sorted(os.listdir(output_dir)):
-                    if f_name.startswith(base):
-                        ext = os.path.splitext(f_name)[1].lower()
-                        f_path = os.path.join(output_dir, f_name).replace(os.sep, '/')
-                        file_result["outputs"][ext] = f_path
+                # 扫描 MinerU 风格输出
+                stem = os.path.splitext(pdf_file.filename)[0]
+                pdf_output_dir = os.path.join(output_dir, stem)
+                if os.path.exists(pdf_output_dir):
+                    md_path = os.path.join(pdf_output_dir, "output.md")
+                    if os.path.exists(md_path):
+                        file_result["outputs"]["md"] = md_path.replace(os.sep, '/')
+                    layout_path = os.path.join(pdf_output_dir, "layout.pdf")
+                    if os.path.exists(layout_path):
+                        file_result["outputs"]["layout_pdf"] = layout_path.replace(os.sep, '/')
+                    images_dir = os.path.join(pdf_output_dir, "images")
+                    if os.path.exists(images_dir):
+                        imgs = sorted(os.listdir(images_dir))
+                        file_result["outputs"]["img"] = [
+                            os.path.join(images_dir, img).replace(os.sep, '/')
+                            for img in imgs
+                        ]
         except Exception as e:
             file_result["status"] = "error"
             file_result["error"] = str(e)

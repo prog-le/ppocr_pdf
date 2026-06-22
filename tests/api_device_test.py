@@ -60,22 +60,26 @@ class TestAPIDevice:
                 "source": "auto"
             }
 
-            fake_output = tmp_path / "output" / "test.txt"
-            fake_output.parent.mkdir(parents=True, exist_ok=True)
-            fake_output.write_text("OCR result")
+            # Create MinerU-style output directory structure
+            pdf_output_dir = tmp_path / "output" / "test"
+            images_dir = pdf_output_dir / "images"
+            images_dir.mkdir(parents=True, exist_ok=True)
+            (pdf_output_dir / "output.md").write_text("# OCR Result\n\nTest content", encoding="utf-8")
+            (pdf_output_dir / "layout.pdf").write_text("%PDF-1.4 fake layout pdf")
+            (images_dir / "page_1.jpg").write_text("fake jpg content")
 
-            with patch('api.os.path.exists', return_value=True):
-                with patch('api.open', MagicMock()) as mock_open:
-                    mock_file = MagicMock()
-                    mock_file.__enter__.return_value.read.return_value = "OCR result"
-                    mock_open.return_value = mock_file
+            # Remove os.path.exists mock — paths actually exist now
+            with patch('api.open', MagicMock()) as mock_open:
+                mock_file = MagicMock()
+                mock_file.__enter__.return_value.read.return_value = "# OCR Result\n\nTest content"
+                mock_open.return_value = mock_file
 
-                    req_data = data or {"model": "paddleocr-vl"}
-                    return client.post(
-                        "/ocr/pdf",
-                        files={"file": ("test.pdf", fake_pdf.read_bytes(), "application/pdf")},
-                        data=req_data
-                    ), mock_handler
+                req_data = data or {"model": "paddleocr-vl"}
+                return client.post(
+                    "/ocr/pdf",
+                    files={"file": ("test.pdf", fake_pdf.read_bytes(), "application/pdf")},
+                    data=req_data
+                ), mock_handler
 
     def test_device_param_accepted(self, client, tmp_path):
         """device 表单参数被正确接收"""
