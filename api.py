@@ -1,12 +1,44 @@
+#!/usr/bin/env python3
+
+# -*- coding: utf-8 -*-
+# ----------------------------------------------------------------------
+# 模块信息
+# ----------------------------------------------------------------------
+# @Author  : Prog.le
+# @Email   : Prog.le@outlook.com
+# @Time    : 2026-06-22
+# @FileName: api.py
+# @Version : 1.3.0
+# ----------------------------------------------------------------------
+# 功能描述
+# ----------------------------------------------------------------------
+# 本模块基于 FastAPI 提供 RESTful OCR 服务，主要功能：
+#   1. GET  /health          — 健康检查，返回服务状态 / 设备信息
+#   2. POST /ocr/pdf         — 单文件 OCR 识别，支持多模型 + 多输出格式
+#   3. POST /upload          — 批量上传 OCR 识别
+#   4. GET  /download/{path} — 下载生成的输出文件（标注 PDF / JSON / PNG）
+#
+# 核心设计：
+#   - handler 缓存池：按 (model, device, lang, model_size, ...) 七元组缓存
+#     PDFOCRHandler 实例，避免重复初始化（30s–2min 的模型加载耗时）
+#   - 输出目录管理：api_outputs/{yyyymmdd}/{request_id}/ 自动清理过期文件
+#   - 并发安全：asyncio.Lock 保护 handler 缓存的读写
+# ----------------------------------------------------------------------
+# 使用示例
+# ----------------------------------------------------------------------
+#   curl -X POST http://localhost:8000/ocr/pdf \
+#     -F "file=@test.pdf" -F "model=pp-ocrv6" -F "output_formats=json"
+# ----------------------------------------------------------------------
+
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 import os
-import json          # ← 新增：用于序列化 413 响应
+import json
 import uuid
 import time
-import asyncio       # ← 新增：用于 handler 缓存的 Lock
+import asyncio
 
 # ---------------------------------------------------------------------------
 # API 输出目录管理: 持久化保存 OCR 输出文件, 供 /download 端点访问
