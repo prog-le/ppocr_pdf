@@ -417,19 +417,7 @@ paddleocr-pdf/
 ├── ocr_pdf.py               # 主程序文件
 ├── api.py                   # API服务模块
 ├── download_models.py       # 模型下载脚本
-├── pytest.ini               # Pytest 配置
 ├── ocr_logs.md              # OCR识别日志(自动生成)
-├── test_input/              # 测试输入目录
-│   └── 01.pdf               # 测试PDF文件
-├── test_output/             # 测试输出目录
-│   └── 01.txt               # 识别结果文件
-├── api_outputs/             # API 输出文件目录(自动生成)
-├── tests/                   # 测试目录
-│   ├── output_format_selector_test.py  # 输出格式测试
-│   ├── download_models_v6_test.py      # 模型下载测试
-│   └── download_models_device_test.py  # 设备检测测试
-├── routers/                 # API 路由模块
-│   └── output_format.py     # 输出格式校验逻辑
 ├── logs/                    # 日志文件目录(自动生成)
 ├── .paddlex/                # 模型缓存目录(自动生成)
 ├── requirements.txt         # 依赖项列表
