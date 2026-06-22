@@ -1,8 +1,9 @@
 paddleocr
 opencv-python
+numpy
 pypdfium2
+tqdm
 watchdog
-python-dotenv
 fastapi
 uvicorn
 python-multipart
