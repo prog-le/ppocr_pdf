@@ -38,9 +38,6 @@ RUN pip install --no-cache-dir ${PADDLE_PACKAGE} && \
 # 复制项目代码（含 device_utils.py，这是所有脚本的公共依赖）
 COPY ocr_pdf.py api.py download_models.py device_utils.py ./
 
-# 可选：PP-ChatOCRv4 运行时补丁（含 try/except ImportError 保护）
-COPY chatocr_patch.py ./
-
 # 创建数据目录并修正权限
 RUN mkdir -p /app/.paddlex /app/output /app/logs \
     && chown -R paddleocr:paddleocr /app
