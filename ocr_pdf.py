@@ -105,6 +105,16 @@ custom_cache_module = CustomCacheModule()
 # 将自定义模块注入到sys.modules中
 sys.modules['paddlex.utils.cache'] = custom_cache_module
 
+# PaddleX 3.7.1 兼容补丁：paddlepaddle-gpu 2.6.2 的 AnalysisConfig 缺少 set_optimization_level
+# PaddleX 内部调用该方法设置优化级别，但该 API 在 2.6.2 中不存在
+try:
+    import paddle.base.libpaddle  # noqa: F401
+    paddle.base.libpaddle.AnalysisConfig.set_optimization_level = (
+        lambda self, level: None
+    )
+except Exception:
+    pass
+
 # 现在导入其他模块
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
