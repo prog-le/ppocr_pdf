@@ -6,9 +6,12 @@ services:
     build:
       context: .
       args:
+        # GPU 构建：使用含 CUDA 11.8 + cuDNN 8.9 的基础镜像
+        BASE_IMAGE: nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
         PADDLE_PACKAGE: paddlepaddle-gpu
-        # pip 镜像源（中国用户加速），构建时使用国内镜像
-        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        # pip 镜像源；注意 paddlepaddle-gpu (759MB) 在国内镜像上经常下载中断
+        # 改用 PyPI 官方源以保证大文件下载稳定性
+        PIP_INDEX_URL: https://pypi.org/simple/
     image: paddleocr-pdf:gpu
     ports:
       - "8000:8000"
@@ -19,9 +22,8 @@ services:
     environment:
       - LOG_LEVEL=info
       - PORT=8000
-      # 运行时也使用国内镜像（如果容器内有 pip install 操作）
-      - PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
-      - PIP_TRUSTED_HOST=mirrors.aliyun.com
+      # 运行时 pip 源（如果容器内有 pip install 操作）
+      - PIP_INDEX_URL=https://pypi.org/simple/
     deploy:
       resources:
         reservations:
@@ -40,8 +42,9 @@ services:
     build:
       context: .
       args:
+        BASE_IMAGE: nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
         PADDLE_PACKAGE: paddlepaddle-gpu
-        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+        PIP_INDEX_URL: https://pypi.org/simple/
     image: paddleocr-pdf:gpu
     volumes:
       - ./models:/app/.paddlex
