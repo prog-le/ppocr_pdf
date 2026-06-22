@@ -1,12 +1,166 @@
+#!/usr/bin/env python3
+
+# -*- coding: utf-8 -*-
+# ----------------------------------------------------------------------
+# 模块信息
+# ----------------------------------------------------------------------
+# @Author  : Prog.le
+# @Email   : Prog.le@outlook.com
+# @Time    : 2026-06-22
+# @FileName: api.py
+# @Version : 1.3.0
+# ----------------------------------------------------------------------
+# 功能描述
+# ----------------------------------------------------------------------
+# 本模块基于 FastAPI 提供 RESTful OCR 服务，主要功能：
+#   1. GET  /health          — 健康检查，返回服务状态 / 设备信息
+#   2. POST /ocr/pdf         — 单文件 OCR 识别，支持多模型 + 多输出格式
+#   3. POST /upload          — 批量上传 OCR 识别
+#   4. GET  /download/{path} — 下载生成的输出文件（标注 PDF / JSON / PNG）
+#
+# 核心设计：
+#   - handler 缓存池：按 (model, device, lang, model_size, ...) 七元组缓存
+#     PDFOCRHandler 实例，避免重复初始化（30s–2min 的模型加载耗时）
+#   - 输出目录管理：api_outputs/{yyyymmdd}/{request_id}/ 自动清理过期文件
+#   - 并发安全：asyncio.Lock 保护 handler 缓存的读写
+# ----------------------------------------------------------------------
+# 使用示例
+# ----------------------------------------------------------------------
+#   curl -X POST http://localhost:8000/ocr/pdf \
+#     -F "file=@test.pdf" -F "model=pp-ocrv6" -F "output_formats=json"
+# ----------------------------------------------------------------------
+
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 import os
+import json
+import uuid
+import time
+import asyncio
+
+# ---------------------------------------------------------------------------
+# API 输出目录管理: 持久化保存 OCR 输出文件, 供 /download 端点访问
+# ---------------------------------------------------------------------------
+API_OUTPUT_BASE = os.path.join(os.getcwd(), "api_outputs")
+API_OUTPUT_TTL = 3600  # 1 小时
+os.makedirs(API_OUTPUT_BASE, exist_ok=True)
+
+# 必须在 paddle 加载前设置，否则 PIR 执行器 bug (ConvertPirAttribute2RuntimeAttribute) 会造成页面崩溃
+os.environ.setdefault("FLAGS_enable_pir_api", "0")
+os.environ.setdefault("PADDLEX_HOME", os.path.join(os.getcwd(), ".paddlex"))
+
 import tempfile
 import logging
 from ocr_pdf import PDFOCRHandler
 from device_utils import detect_device
+
+# ---------------------------------------------------------------------------
+# PDFOCRHandler 缓存 + 并发控制
+# 实现：(model, device, lang, model_size, optimize_pdf, optimize_level, grayscale)
+#       七元组到 handler 实例的映射，避免每次请求重复初始化（30s–2min）
+# 注意：PaddleOCR 实例非线程安全，每个 handler 绑定一个 asyncio.Lock
+# ---------------------------------------------------------------------------
+_HANDLER_CACHE: dict[tuple, "PDFOCRHandler"] = {}
+_HANDLER_LOCKS: dict[tuple, asyncio.Lock] = {}
+
+# ---------------------------------------------------------------------------
+# 支持的模型列表（模块级常量，供测试与端点共用）
+# ---------------------------------------------------------------------------
+VALID_MODELS = ["paddleocr-vl", "pp-ocrv6", "pp-structurev3"]
+# 兼容旧版测试导入（tests/api_device_test.py 从 api 模块导入 valid_models）
+valid_models = VALID_MODELS
+
+# ---------------------------------------------------------------------------
+# 输出格式常量 & 校验（优先从 routers/ 模块导入）
+# ---------------------------------------------------------------------------
+try:
+    from routers.output_format import VALID_OUTPUT_FORMATS, validate_output_formats
+except ImportError:
+    # 回退：模块未就绪时使用行内定义
+    VALID_OUTPUT_FORMATS = ["markdown", "json", "img", "pdf"]
+
+    def validate_output_formats(raw: Optional[str]) -> Optional[list[str]]:
+        if not raw:
+            return None
+        formats = [f.strip() for f in raw.split(",") if f.strip()]
+        invalid = set(formats) - set(VALID_OUTPUT_FORMATS)
+        if invalid:
+            raise ValueError(
+                f"无效的输出格式: {', '.join(sorted(invalid))}。"
+                f" 可选: {', '.join(VALID_OUTPUT_FORMATS)}"
+            )
+        return formats if formats else None
+
+
+def _cleanup_expired_dirs():
+    """惰性清理: 删除超过 TTL 的 API 输出目录"""
+    now = time.time()
+    try:
+        for entry in os.listdir(API_OUTPUT_BASE):
+            entry_path = os.path.join(API_OUTPUT_BASE, entry)
+            if os.path.isdir(entry_path):
+                age = now - os.path.getmtime(entry_path)
+                if age > API_OUTPUT_TTL:
+                    import shutil
+                    shutil.rmtree(entry_path, ignore_errors=True)
+    except Exception:
+        pass
+
+
+def get_handler(
+    output_dir: str,
+    model: str,
+    device: str,
+    lang: str,
+    model_size: str,
+    output_formats: Optional[list] = None,
+    optimize_pdf: bool = False,
+    optimize_level: str = "medium",
+    grayscale: bool = False,
+) -> "PDFOCRHandler":
+    """获取或创建 PDFOCRHandler 实例（按模型参数缓存）
+
+    Cache key = (model, device, lang, model_size, tuple(output_formats), optimize_pdf, optimize_level, grayscale)
+    output_dir 不参与 key（因每次请求不同），在返回缓存实例时覆盖。
+    """
+    key = (model, device, lang, model_size,
+           tuple(output_formats) if output_formats else tuple(),
+           optimize_pdf, optimize_level, grayscale)
+    handler = _HANDLER_CACHE.get(key)
+    if handler is not None:
+        # 缓存命中：更新 output_dir（每次请求不同请求目录）
+        handler.output_dir = output_dir
+        return handler
+    # 缓存未命中：创建新 handler 并缓存
+    handler = PDFOCRHandler(
+        output_dir, model,
+        device=device,
+        lang=lang,
+        model_size=model_size,
+        output_formats=output_formats,
+        optimize_pdf=optimize_pdf,
+        optimize_level=optimize_level,
+        grayscale=grayscale,
+    )
+    _HANDLER_CACHE[key] = handler
+    return handler
+
+
+def clear_handler_cache():
+    """清空 handler 缓存（测试环境使用，避免 mock 实例跨测试污染）"""
+    _HANDLER_CACHE.clear()
+    _HANDLER_LOCKS.clear()
+
+
+# PP-ChatOCRv4 运行时补丁：修复 LLM JSON 数组/裸字符串解析 + 注入 few-shot 示例
+try:
+    import chatocr_patch  # noqa: F401  (patches apply on import)
+
+    chatocr_patch
+except ImportError:
+    pass
 
 # 配置日志级别映射
 LOG_LEVELS = {
@@ -40,11 +194,78 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# 添加CORS中间件（允许Web前端跨域调用）
+# ---------------------------------------------------------------------------
+# 上传大小限制中间件（必须在 CORS 之前注册，作为最外层先检查大小）
+# ---------------------------------------------------------------------------
+_MAX_UPLOAD_SIZE_MB = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "200"))
+_MAX_UPLOAD_SIZE = _MAX_UPLOAD_SIZE_MB * 1024 * 1024
+
+
+class MaxBodySizeMiddleware:
+    """ASGI 中间件：限制请求体大小，超过时返回 413 Payload Too Large
+
+    检查 Content-Length 头，若超过阈值则在请求到达路由之前直接拒绝。
+    注册为最外层中间件，超大 body 不会进入 CORS 和路由处理。
+    """
+
+    def __init__(self, app, max_size: int = _MAX_UPLOAD_SIZE):
+        self.app = app
+        self.max_size = max_size
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # 读取 Content-Length 头（bytes 格式）
+        content_length = 0
+        for name, value in scope.get("headers", []):
+            if name == b"content-length":
+                try:
+                    content_length = int(value)
+                except (ValueError, TypeError):
+                    pass
+                break
+
+        if content_length > self.max_size:
+            body = json.dumps({
+                "detail": f"文件大小超过限制，最大允许 {_MAX_UPLOAD_SIZE_MB} MB"
+            }).encode("utf-8")
+            await send({
+                "type": "http.response.start",
+                "status": 413,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                ],
+            })
+            await send({
+                "type": "http.response.body",
+                "body": body,
+            })
+            return
+
+        await self.app(scope, receive, send)
+
+
+# 添加中间件（注意：FastAPI 中间件为 LIFO 顺序——后注册的最先执行）
+# MaxBodySize 后注册，作为最外层，请求先检查大小再进入 CORS 和路由
+app.add_middleware(MaxBodySizeMiddleware, max_size=_MAX_UPLOAD_SIZE)
+
+# CORS 中间件（允许 Web 前端跨域调用）
+# 安全说明：
+# - 当 CORS_ALLOW_ORIGINS 环境变量未设置时，使用 ["*"] + allow_credentials=False
+# - 当设置了 CORS_ALLOW_ORIGINS（逗号分隔），使用白名单 + allow_credentials=True
+_cors_origins_str = os.environ.get("CORS_ALLOW_ORIGINS", "")
+if _cors_origins_str:
+    _cors_allow_origins = [origin.strip() for origin in _cors_origins_str.split(",") if origin.strip()]
+else:
+    _cors_allow_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_allow_origins,
+    allow_credentials=bool(_cors_origins_str),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -68,7 +289,8 @@ def health_check():
     return {
         "status": "healthy",
         "service": "PDF OCR API",
-        "models": ["pp-ocrv5", "pp-structurev3", "paddleocr-vl", "pp-chatocrv4"],
+        "models": ["pp-ocrv6", "pp-ocrv5", "pp-structurev3", "paddleocr-vl", "pp-chatocrv4"],
+        "output_formats": VALID_OUTPUT_FORMATS,
         "device_modes": ["auto", "gpu", "cpu"],
         "default_device": "auto"
     }
@@ -94,22 +316,31 @@ def device_info():
 @app.post("/ocr/pdf")
 async def ocr_pdf(
     file: UploadFile = File(...),
-    model: Optional[str] = Form(default="pp-ocrv5", description="OCR模型选择: pp-ocrv5, pp-structurev3, paddleocr-vl, pp-chatocrv4"),
+    model: Optional[str] = Form(default="pp-ocrv6", description="OCR模型选择: pp-ocrv6 (默认), pp-ocrv5, pp-structurev3, paddleocr-vl, pp-chatocrv4"),
     device: Optional[str] = Form(default="auto", description="推理设备: auto(自动检测), gpu(强制GPU), cpu(强制CPU)"),
+    lang: Optional[str] = Form(default="ch", description="语言 (PP-OCRv6/v5): ch, chinese_cht, en, japan, korean, latin"),
+    model_size: Optional[str] = Form(default="medium", description="PP-OCRv6 模型尺寸: medium, small, tiny"),
     optimize_pdf: Optional[bool] = Form(default=False, description="是否优化PDF文件"),
     optimize_level: Optional[str] = Form(default="medium", description="PDF优化级别: low, medium, high"),
-    grayscale: Optional[bool] = Form(default=False, description="是否使用灰度渲染")
+    grayscale: Optional[bool] = Form(default=False, description="是否使用灰度渲染"),
+    output_formats: Optional[str] = Form(
+        default=None,
+        description="(已废弃) 输出始终为 MinerU 风格: {stem}/images/page_N.jpg + output.md + layout.pdf"
+    ),
 ):
     """
     处理PDF文件的OCR识别
-    
+
     Args:
         file: 上传的PDF文件
-        model: OCR模型选择，可选值: pp-ocrv5, pp-structurev3, paddleocr-vl, pp-chatocrv4
-        optimize_pdf: 是否优化PDF文件
+        model: OCR模型选择，可选值: pp-ocrv6, pp-ocrv5, pp-structurev3, paddleocr-vl, pp-chatocrv4
+        lang: 语言 (PP-OCRv6/v5)
+        model_size: PP-OCRv6 模型尺寸 (medium/small/tiny)
+        optimize_pdf: 是否优化PDF
         optimize_level: PDF优化级别，可选值: low, medium, high
         grayscale: 是否使用灰度渲染
-    
+        output_formats: (已废弃) 保留以兼容旧调用方, 不再生效
+
     Returns:
         识别结果
     """
@@ -118,9 +349,8 @@ async def ocr_pdf(
         raise HTTPException(status_code=400, detail="文件类型错误，请上传PDF文件")
     
     # 验证模型选择
-    valid_models = ["pp-ocrv5", "pp-structurev3", "paddleocr-vl", "pp-chatocrv4"]
-    if model not in valid_models:
-        raise HTTPException(status_code=400, detail=f"模型选择错误，请选择以下模型之一: {', '.join(valid_models)}")
+    if model not in VALID_MODELS:
+        raise HTTPException(status_code=400, detail=f"模型选择错误，请选择以下模型之一: {', '.join(VALID_MODELS)}")
     
     # 验证优化级别
     valid_optimize_levels = ["low", "medium", "high"]
@@ -132,62 +362,105 @@ async def ocr_pdf(
     if device not in valid_devices:
         raise HTTPException(status_code=400, detail=f"设备参数错误，请选择以下之一: {', '.join(valid_devices)}")
     
+    # 验证输出格式
     try:
-        # 创建临时目录保存上传的PDF文件
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            # 保存上传的PDF文件
-            pdf_path = os.path.join(tmp_dir, file.filename)
-            with open(pdf_path, "wb") as buffer:
-                buffer.write(await file.read())
-            
-            # 创建临时输出目录
-            output_dir = os.path.join(tmp_dir, "output")
-            os.makedirs(output_dir, exist_ok=True)
-            
-            # 初始化OCR处理器
-            logger.info(f"初始化OCR处理器，使用模型: {model}")
-            ocr_handler = PDFOCRHandler(
-                output_dir, 
-                model,
-                device=device,
-                optimize_pdf=optimize_pdf,
-                optimize_level=optimize_level,
-                grayscale=grayscale
-            )
-            
-            # 处理PDF文件
-            logger.info(f"开始处理PDF文件: {file.filename}")
-            success = ocr_handler.process_pdf(pdf_path)
-            
-            if not success:
-                raise HTTPException(status_code=500, detail="PDF文件处理失败")
-            
-            # 读取识别结果
-            txt_filename = os.path.splitext(file.filename)[0] + ".txt"
-            txt_path = os.path.join(output_dir, txt_filename)
-            
-            if not os.path.exists(txt_path):
-                raise HTTPException(status_code=500, detail="识别结果文件生成失败")
-            
-            with open(txt_path, "r", encoding="utf-8") as f:
-                ocr_result = f.read()
-            
-            # 检测实际使用的设备
-            device_info = detect_device(device if device != "auto" else None)
+        formats_list = validate_output_formats(output_formats)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    try:
+        # 惰性清理过期输出目录
+        _cleanup_expired_dirs()
+        
+        # 创建持久化请求目录
+        request_id = str(uuid.uuid4())[:8]
+        request_dir = os.path.join(API_OUTPUT_BASE, request_id)
+        os.makedirs(request_dir, exist_ok=True)
+        
+        # 保存上传的PDF文件
+        pdf_path = os.path.join(request_dir, file.filename)
+        with open(pdf_path, "wb") as buffer:
+            buffer.write(await file.read())
+        
+        # 创建输出子目录
+        output_dir = os.path.join(request_dir, "output")
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # 获取或创建OCR处理器（工厂函数，带缓存+并发锁）
+        logger.info(f"获取OCR处理器，使用模型: {model}")
+        ocr_handler = get_handler(
+            output_dir, model,
+            device=device,
+            lang=lang,
+            model_size=model_size,
+            output_formats=formats_list,
+            optimize_pdf=optimize_pdf,
+            optimize_level=optimize_level,
+            grayscale=grayscale,
+        )
 
-            # 返回识别结果
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "status": "success",
-                    "filename": file.filename,
-                    "model": model,
-                    "device": device,
-                    "device_info": device_info,
-                    "result": ocr_result
-                }
-            )
-            
+        # 处理PDF文件（同一 handler 的并发调用通过 asyncio.Lock 串行化）
+        logger.info(f"开始处理PDF文件: {file.filename}")
+        lock = _HANDLER_LOCKS.setdefault(
+            (model, device, lang, model_size,
+             tuple(formats_list) if formats_list else tuple(),
+             optimize_pdf, optimize_level, grayscale),
+            asyncio.Lock(),
+        )
+        async with lock:
+            success = ocr_handler.process_pdf(pdf_path)
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="PDF文件处理失败")
+        
+        # 扫描 MinerU 风格输出目录结构
+        stem = os.path.splitext(file.filename)[0]
+        pdf_output_dir = os.path.join(output_dir, stem)
+        outputs = {}
+        md_path = ""
+        layout_path = ""
+        images_dir = ""
+        if os.path.exists(pdf_output_dir):
+            md_path = os.path.join(pdf_output_dir, "output.md")
+            if os.path.exists(md_path):
+                outputs["md"] = md_path.replace(os.sep, '/')
+            layout_path = os.path.join(pdf_output_dir, "layout.pdf")
+            if os.path.exists(layout_path):
+                outputs["layout_pdf"] = layout_path.replace(os.sep, '/')
+            images_dir = os.path.join(pdf_output_dir, "images")
+            if os.path.exists(images_dir):
+                imgs = sorted(os.listdir(images_dir))
+                outputs["img"] = [
+                    os.path.join(images_dir, img).replace(os.sep, '/')
+                    for img in imgs
+                ]
+        
+        # 读取 Markdown 结果
+        if os.path.exists(md_path):
+            with open(md_path, "r", encoding="utf-8") as f:
+                ocr_result = f.read()
+        else:
+            ocr_result = ""
+        
+        # 检测实际使用的设备
+        device_info = detect_device(device if device != "auto" else None)
+
+        # 返回识别结果
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "filename": file.filename,
+                "model": model,
+                "lang": lang,
+                "model_size": model_size,
+                "device": device,
+                "device_info": device_info,
+                "request_id": request_id,
+                "outputs": outputs,
+                "result": ocr_result,
+            }
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -196,12 +469,172 @@ async def ocr_pdf(
         logger.debug(f"完整错误堆栈: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"处理PDF文件时发生错误: {str(e)}")
 
-# 运行API服务
+
+# ---------------------------------------------------------------------------
+# 批量上传端点: 同时处理多个 PDF 文件
+# ---------------------------------------------------------------------------
+@app.post("/upload")
+async def upload_pdfs(
+    files: list[UploadFile] = File(...),
+    model: Optional[str] = Form(default="pp-ocrv6"),
+    device: Optional[str] = Form(default="auto"),
+    lang: Optional[str] = Form(default="ch"),
+    model_size: Optional[str] = Form(default="medium"),
+    optimize_pdf: Optional[bool] = Form(default=False),
+    optimize_level: Optional[str] = Form(default="medium"),
+    grayscale: Optional[bool] = Form(default=False),
+    output_formats: Optional[str] = Form(default=None, description="(已废弃) 不再生效"),
+):
+    """批量上传 PDF 文件并逐一进行 OCR 识别
+
+    与 /ocr/pdf 使用相同的 handler 缓存，所以首次请求后后续请求不会重复初始化模型。
+    每个文件独立处理，一个文件的失败不影响其他文件。
+    """
+    # 验证参数
+    if model not in VALID_MODELS:
+        raise HTTPException(status_code=400, detail=f"模型选择错误，请选择以下模型之一: {', '.join(VALID_MODELS)}")
+
+    valid_optimize_levels = ["low", "medium", "high"]
+    if optimize_level not in valid_optimize_levels:
+        raise HTTPException(status_code=400, detail=f"优化级别选择错误: {', '.join(valid_optimize_levels)}")
+
+    valid_devices = ["auto", "gpu", "cpu"]
+    if device not in valid_devices:
+        raise HTTPException(status_code=400, detail=f"设备参数错误: {', '.join(valid_devices)}")
+
+    try:
+        formats_list = validate_output_formats(output_formats)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not files:
+        raise HTTPException(status_code=400, detail="请至少上传一个 PDF 文件")
+
+    # 过滤非 PDF 文件
+    pdf_files = [f for f in files if f.filename and f.filename.lower().endswith('.pdf')]
+    if not pdf_files:
+        raise HTTPException(status_code=400, detail="上传的文件中没有 PDF 文件")
+
+    # 惰性清理过期输出目录
+    _cleanup_expired_dirs()
+
+    # 创建批次请求目录
+    batch_id = str(uuid.uuid4())[:8]
+    batch_dir = os.path.join(API_OUTPUT_BASE, f"batch_{batch_id}")
+    os.makedirs(batch_dir, exist_ok=True)
+
+    # 获取或创建 handler
+    output_dir = os.path.join(batch_dir, "output")
+    os.makedirs(output_dir, exist_ok=True)
+
+    logger.info(f"批量上传: 共 {len(pdf_files)} 个 PDF 文件, 模型={model}")
+    ocr_handler = get_handler(
+        output_dir, model,
+        device=device, lang=lang, model_size=model_size,
+        output_formats=formats_list,
+        optimize_pdf=optimize_pdf,
+        optimize_level=optimize_level,
+        grayscale=grayscale,
+    )
+
+    results = []
+    lock = _HANDLER_LOCKS.setdefault(
+        (model, device, lang, model_size,
+         tuple(formats_list) if formats_list else tuple(),
+         optimize_pdf, optimize_level, grayscale),
+        asyncio.Lock(),
+    )
+
+    for pdf_file in pdf_files:
+        file_result = {
+            "filename": pdf_file.filename,
+            "status": "processing",
+            "error": None,
+            "outputs": {},
+        }
+        try:
+            # 保存到批次目录
+            pdf_path = os.path.join(batch_dir, pdf_file.filename)
+            content = await pdf_file.read()
+            with open(pdf_path, "wb") as f:
+                f.write(content)
+
+            # 处理
+            async with lock:
+                success = ocr_handler.process_pdf(pdf_path)
+
+            if not success:
+                file_result["status"] = "failed"
+                file_result["error"] = "处理失败"
+            else:
+                file_result["status"] = "success"
+                # 扫描 MinerU 风格输出
+                stem = os.path.splitext(pdf_file.filename)[0]
+                pdf_output_dir = os.path.join(output_dir, stem)
+                if os.path.exists(pdf_output_dir):
+                    md_path = os.path.join(pdf_output_dir, "output.md")
+                    if os.path.exists(md_path):
+                        file_result["outputs"]["md"] = md_path.replace(os.sep, '/')
+                    layout_path = os.path.join(pdf_output_dir, "layout.pdf")
+                    if os.path.exists(layout_path):
+                        file_result["outputs"]["layout_pdf"] = layout_path.replace(os.sep, '/')
+                    images_dir = os.path.join(pdf_output_dir, "images")
+                    if os.path.exists(images_dir):
+                        imgs = sorted(os.listdir(images_dir))
+                        file_result["outputs"]["img"] = [
+                            os.path.join(images_dir, img).replace(os.sep, '/')
+                            for img in imgs
+                        ]
+        except Exception as e:
+            file_result["status"] = "error"
+            file_result["error"] = str(e)
+            logger.error(f"处理 {pdf_file.filename} 失败: {e}")
+
+        results.append(file_result)
+
+    device_info = detect_device(device if device != "auto" else None)
+    return JSONResponse(content={
+        "status": "completed",
+        "batch_id": batch_id,
+        "total": len(pdf_files),
+        "success_count": sum(1 for r in results if r["status"] == "success"),
+        "failed_count": sum(1 for r in results if r["status"] in ("failed", "error")),
+        "device": device,
+        "device_info": device_info,
+        "results": results,
+    })
+
+
+# ---------------------------------------------------------------------------
+# 下载端点: 提供 OCR 输出文件的直接下载
+# ---------------------------------------------------------------------------
+@app.get("/download/{path:path}")
+async def download_output(path: str):
+    """下载 API 生成的输出文件"""
+    from fastapi.responses import FileResponse
+    
+    full_path = os.path.normpath(os.path.join(API_OUTPUT_BASE, path))
+    # 安全: 防止 path traversal
+    if not full_path.startswith(os.path.normpath(API_OUTPUT_BASE)):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not os.path.exists(full_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    media_type = {
+        '.txt': 'text/plain',
+        '.md': 'text/markdown',
+        '.json': 'application/json',
+        '.png': 'image/png',
+        '.pdf': 'application/pdf',
+    }.get(os.path.splitext(path)[1].lower(), 'application/octet-stream')
+    
+    return FileResponse(full_path, media_type=media_type, filename=os.path.basename(path))
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "api:app",
         host="0.0.0.0",
-        port=8000,
-        reload=True
+        port=int(os.environ.get("PORT", "8000")),
+        reload=os.environ.get("UVICORN_RELOAD", "0") == "1"
     )

@@ -6,18 +6,18 @@
 # ----------------------------------------------------------------------
 # @Author  : Prog.le
 # @Email   : Prog.le@outlook.com
-# @Time    : 2026-01-19
+# @Time    : 2026-06-22
 # @FileName: download_models.py
-# @Software: TRAE CN
-# @Version : 1.0.0
+# @Version : 1.3.0
 # ----------------------------------------------------------------------
 # 功能描述
 # ----------------------------------------------------------------------
 # 本脚本用于下载PaddleOCR模型到指定文件夹
 # 支持下载的模型：
-#   - pp-ocrv5: PP-OCRv5模型
-#   - pp-structurev3: PP-StructureV3模型
-#   - paddleocr-vl: PaddleOCR-VL模型
+#   - pp-ocrv6: PP-OCRv6 通用文字识别 (PaddleOCR 3.7+ 默认, 50 种语言)
+#   - pp-ocrv5: PP-OCRv5 旧版通用文字识别
+#   - pp-structurev3: PP-StructureV3 复杂文档结构化解析
+#   - paddleocr-vl: PaddleOCR-VL 多模态文档解析
 # ----------------------------------------------------------------------
 # 使用示例
 # ----------------------------------------------------------------------
@@ -25,10 +25,15 @@
 #   python download_models.py
 # 
 # 下载指定模型到自定义目录
-#   python download_models.py -m pp-ocrv5,paddleocr-vl -o ./models
+#   python download_models.py -m pp-ocrv6,paddleocr-vl -o ./models
 # ----------------------------------------------------------------------
 
 import os
+
+# 必须在 paddle 加载前设置，否则 PIR 执行器 bug (ConvertPirAttribute2RuntimeAttribute) 会造成页面崩溃
+os.environ.setdefault("FLAGS_enable_pir_api", "0")
+os.environ.setdefault("PADDLEX_HOME", os.path.join(os.getcwd(), ".paddlex"))
+
 import argparse
 import logging
 import sys
@@ -53,7 +58,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # 支持的模型列表
-SUPPORTED_MODELS = ['pp-ocrv5', 'pp-structurev3', 'paddleocr-vl']
+SUPPORTED_MODELS = ['pp-ocrv6', 'pp-ocrv5', 'pp-structurev3', 'paddleocr-vl']
 
 # 创建自定义的paddlex.utils.cache模块
 class CustomCacheModule:
@@ -104,26 +109,39 @@ def setup_custom_cache(cache_dir=None):
     logger.info(f"已设置自定义缓存目录: {custom_cache_module.CACHE_DIR}")
 
 
-def download_model(model_name):
+def download_model(model_name, lang='ch', model_size='medium'):
     """
     下载指定的PaddleOCR模型
-    
+
     Args:
-        model_name (str): 模型名称
+        model_name (str): 模型名称 (pp-ocrv6 / pp-ocrv5 / pp-structurev3 / paddleocr-vl)
+        lang (str): 语言 (PP-OCRv6/v5), 默认 ch
+        model_size (str): 模型尺寸 (PP-OCRv6), medium / small / tiny
     """
-    logger.info(f"开始下载 {model_name} 模型...")
-    
+    logger.info(f"开始下载 {model_name} 模型"
+                f"{f' ({model_size})' if model_name in ('pp-ocrv6', 'pp-ocrv5') else ''}"
+                f"{f' lang={lang}' if model_name in ('pp-ocrv6', 'pp-ocrv5') else ''}...")
+
     try:
         # 动态导入模型类，确保在设置好缓存目录后再导入
         from paddleocr import PaddleOCR, PPStructureV3, PaddleOCRVL
-        
-        if model_name == 'pp-ocrv5':
-            # 下载PP-OCRv5模型
+
+        if model_name in ('pp-ocrv6', 'pp-ocrv5'):
+            # PP-OCRv6 / PP-OCRv5 模型
+            # 显式指定 text_*_model_name 锁定到 v6/v5 版本
+            prefix = 'PP-OCRv6' if model_name == 'pp-ocrv6' else 'PP-OCRv5'
+            det_name = f"{prefix}_{model_size}_det"
+            rec_name = f"{prefix}_{model_size}_rec"
+            logger.info(f"下载 {model_name} 模型: {det_name} + {rec_name} (lang={lang})")
             ocr = PaddleOCR(
                 use_textline_orientation=True,
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
-                device='cpu'
+                device='cpu',
+                lang=lang,
+                text_detection_model_name=det_name,
+                text_recognition_model_name=rec_name,
+                enable_mkldnn=False  # 禁用 MKLDNN 避免 PIR+oneDNN 属性转换 bug
             )
         elif model_name == 'pp-structurev3':
             # 下载PP-StructureV3模型
@@ -133,26 +151,29 @@ def download_model(model_name):
             except ImportError:
                 logger.error(f"下载 {model_name} 模型需要安装额外依赖: 'pip install \"paddlex[ocr]\"'")
                 return False
-            
+
             ocr = PPStructureV3(
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
-                device='cpu'
+                device='cpu',
+                enable_mkldnn=False  # 禁用 MKLDNN 避免 PIR+oneDNN 属性转换 bug
             )
         elif model_name == 'paddleocr-vl':
             # 下载PaddleOCR-VL模型
             ocr = PaddleOCRVL(
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
-                device='cpu'
+                device='cpu',
+                use_queues=False,  # 禁用多线程队列模式: 默认 YAML 中 use_queues=True, 但 Paddle 的 VLM 模型在多线程下不线程安全
+                enable_mkldnn=False  # 禁用 MKLDNN 避免 PIR+oneDNN 属性转换 bug
             )
         else:
             logger.error(f"不支持的模型: {model_name}")
             return False
-        
+
         logger.info(f"{model_name} 模型下载完成!")
         return True
-    
+
     except Exception as e:
         logger.error(f"下载 {model_name} 模型时出错: {str(e)}")
         import traceback
@@ -179,6 +200,16 @@ def main():
         choices=LOG_LEVELS.keys(),
         default='info',
         help=f"日志输出级别，可选值: {', '.join(LOG_LEVELS.keys())}，默认: info"
+    )
+    parser.add_argument(
+        '--lang', type=str, default='ch',
+        choices=['ch', 'chinese_cht', 'en', 'japan', 'korean', 'latin'],
+        help="语言 (PP-OCRv6/v5): ch, chinese_cht, en, japan, korean, latin, 默认: ch"
+    )
+    parser.add_argument(
+        '--model-size', type=str, default='medium',
+        choices=['medium', 'small', 'tiny'],
+        help="PP-OCRv6 模型尺寸: medium / small / tiny, 默认: medium"
     )
     
     args = parser.parse_args()
@@ -229,7 +260,7 @@ def main():
     # 下载模型
     success_count = 0
     for model in models_to_download:
-        if download_model(model):
+        if download_model(model, lang=args.lang, model_size=args.model_size):
             success_count += 1
     
     logger.info(f"\n下载完成: {success_count}/{len(models_to_download)} 个模型下载成功")

@@ -135,6 +135,12 @@ curl -X POST "http://localhost:8000/ocr/pdf" \
   -F "optimize_pdf=true" \
   -F "optimize_level=high" \
   -F "grayscale=true"
+
+# PDF OCR识别（仅输出 JSON 格式）
+curl -X POST "http://localhost:8000/ocr/pdf" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@./test_input/01.pdf" \
+  -F "output_formats=json"
 ```
 
 ## 6. 容器管理
