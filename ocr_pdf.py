@@ -887,12 +887,25 @@ class PDFOCRHandler:
         color = (200, 150, 50)  # default: 浅蓝/棕
         label = ''
 
-        # --- 结构模型格式 (PP-StructureV3 / PaddleOCR-VL) ---
-        if hasattr(res, 'res'):
+        # --- PP-StructureV3 OCRResult 格式 (paddlex OCRPipeline) ---
+        if hasattr(res, 'json') and isinstance(res.json, dict) and 'res' in res.json:
+            res_data = res.json['res']
+            dt_polys = res_data.get('dt_polys', [])
+            rec_texts = res_data.get('rec_texts', [])
+            for i, poly in enumerate(dt_polys):
+                if isinstance(poly, (list, tuple)) and len(poly) >= 4:
+                    # poly = [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
+                    box_pts = [[int(p[0]), int(p[1])] for p in poly[:4]]
+                    boxes.append(box_pts)
+                    colors.append((255, 0, 0))  # 蓝 = text
+                    labels.append(str(rec_texts[i]) if i < len(rec_texts) else '')
+
+        # --- 结构模型格式 (PaddleOCR-VL / 旧PP-StructureV3) ---
+        elif hasattr(res, 'res'):
             for item in res.res:
                 if isinstance(item, dict) and 'bbox' in item:
                     bbox = item['bbox']  # [x1, y1, x2, y2]
-                    # PP-StructureV3 的 bbox 可能是 [x1,y1,x2,y2] 或 [[x1,y1],[x2,y2],...]
+                    # bbox 可能是 [x1,y1,x2,y2] 或 [[x1,y1],[x2,y2],...]
                     if (isinstance(bbox, (list, tuple)) and len(bbox) >= 4
                             and all(isinstance(v, (int, float)) for v in bbox[:4])):
                         # [x1, y1, x2, y2] 格式
@@ -951,21 +964,21 @@ class PDFOCRHandler:
                 cv2.putText(img, box_label, (text_x, text_y - 2),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-            # 将半透明覆盖层与原始图像混合（使检测区域有明显颜色蒙版）
-            if overlay is not None:
-                cv2.addWeighted(overlay, 0.40, img, 0.60, 0, img)
-                logger.info("_draw_detection: 绘制了 %d 个半透明覆盖框", len(boxes))
-            elif boxes:
-                logger.warning("_draw_detection: 有 %d 个框但 overlay 未创建", len(boxes))
-            else:
-                logger.warning("_draw_detection: 未识别到任何检测框 (res 类型: %s, hasattr res: %s)",
-                              type(res).__name__, hasattr(res, 'res'))
+        # --- 半透明混合 + 诊断日志 (OUTSIDE for 循环, 确保无条件执行) ---
+        if overlay is not None:
+            cv2.addWeighted(overlay, 0.40, img, 0.60, 0, img)
+            logger.info("_draw_detection: 绘制了 %d 个半透明覆盖框", len(boxes))
+        elif boxes:
+            logger.warning("_draw_detection: 有 %d 个框但 overlay 未创建", len(boxes))
+        else:
+            logger.warning("_draw_detection: 未识别到任何检测框 (res 类型: %s, hasattr json: %s, hasattr res: %s)",
+                          type(res).__name__, hasattr(res, 'json'), hasattr(res, 'res'))
 
-            # === 诊断: 无论如何在第1页画一个明显的测试色块，确认渲染管线正常 ===
-            h, w = img.shape[:2]
-            cv2.rectangle(img, (w - 120, 0), (w - 1, 40), (0, 0, 255), -1)  # 右上角红色条
-            cv2.putText(img, "OVERLAY OK", (w - 115, 28),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        # === 诊断: 画在每一张图上，确认渲染管线正常 ===
+        h, w = img.shape[:2]
+        cv2.rectangle(img, (w - 120, 0), (w - 1, 40), (0, 0, 255), -1)  # 右上角红色条
+        cv2.putText(img, "OVERLAY OK", (w - 115, 28),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
 class PDFFileHandler(FileSystemEventHandler):
     """监控目录中的新PDF文件（同步处理）"""
