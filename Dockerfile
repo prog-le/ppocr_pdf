@@ -11,8 +11,18 @@ ENV PYTHONUNBUFFERED=1 \
     PORT=8000
 
 # 构建参数：构建时可指定 GPU 版本
-#   docker build --build-arg PADDLE_PACKAGE=paddlepaddle-gpu -t paddleocr-pdf .
+#   docker build --build-arg PADDLE_PACKAGE=paddlepaddle-gpu -t paddleocr-pdf:gpu .
+# 注意：
+#   - paddlepaddle-gpu 通过 pip 自带 CUDA 12 运行时，python:3.11-slim 即可支持 GPU
+#   - 运行时必须加 --gpus all --shm-size=8g，否则自动降级为 CPU
+#   - 默认值 paddlepaddle 为 CPU 版本，体积更小、兼容性更广
 ARG PADDLE_PACKAGE=paddlepaddle
+# pip 镜像源构建参数（中国用户可传入阿里云/清华/ModelScope 等镜像）
+ARG PIP_INDEX_URL=https://pypi.org/simple/
+ARG PIP_TRUSTED_HOST=pypi.org
+# 设置 pip 镜像（在安装 Python 依赖前生效）
+RUN pip config set global.index-url ${PIP_INDEX_URL} \
+    && pip config set global.trusted-host ${PIP_TRUSTED_HOST}
 
 # 安装系统运行时依赖（仅运行时必需，无需 gcc/g++ 等编译工具）
 RUN apt-get update && apt-get install -y --no-install-recommends \

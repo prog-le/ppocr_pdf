@@ -37,6 +37,16 @@
 - 至少2GB可用内存
 - 至少5GB可用磁盘空间
 
+### 3.1 GPU 额外要求
+
+如需使用 GPU 加速，还需要满足：
+
+- **NVIDIA 容器运行时**（NVIDIA Container Toolkit）已安装
+  - Linux: `sudo apt install nvidia-container-toolkit && sudo systemctl restart docker`
+  - Windows Docker Desktop: WSL2 backend 已启用 + `--gpus all` 支持（Docker Desktop 自带，无需额外安装）
+- **NVIDIA GPU 驱动**版本 ≥ 525.60.13（支持 CUDA 12）
+- Docker 默认运行时为 `nvidia`（检查：`docker info | grep "Runtimes"` 应包含 `nvidia`）
+
 ## 4. 部署步骤
 
 ### 4.1 克隆项目
@@ -59,6 +69,10 @@ docker build -t paddleocr-pdf .
 ```bash
 docker build --build-arg PADDLE_PACKAGE=paddlepaddle-gpu -t paddleocr-pdf:gpu .
 ```
+
+> **注意**：`paddlepaddle-gpu` 通过 pip 自带 CUDA 12 运行时（`nvidia-cuda-runtime-cu12`），
+> 即使使用 `python:3.11-slim` 基础镜像也能支持 GPU，无需切换到 `nvidia/cuda` 基础镜像。
+> 但运行时**必须**加 `--gpus all` 和 `--shm-size=8g`（见下方 GPU 运行说明）。
 
 #### 4.2.3 构建特定架构镜像
 
@@ -105,6 +119,43 @@ docker run -d -p 8000:8000 \
   --name paddleocr-pdf-container \
   paddleocr-pdf
 ```
+
+#### 4.3.4 GPU 加速运行
+
+必须使用 `--gpus all` 和 `--shm-size=8g`，否则 paddlepaddle-gpu 会自动降级为 CPU 模式：
+
+```bash
+# GPU API 服务（推荐）
+docker run -d -p 8000:8000 \
+  --gpus all \
+  --shm-size=8g \
+  -v ./models:/app/.paddlex \
+  -v ./output:/app/output \
+  -v ./logs:/app/logs \
+  --name paddleocr-pdf-gpu \
+  paddleocr-pdf:gpu
+
+# GPU 一次性 OCR 任务
+docker run --rm \
+  --gpus all \
+  --shm-size=8g \
+  -v ./models:/app/.paddlex \
+  -v ./test_input:/app/input \
+  -v ./output:/app/output \
+  paddleocr-pdf:gpu \
+  python ocr_pdf.py -i /app/input -o /app/output --device gpu
+
+# 验证 GPU 是否被容器识别
+docker run --rm --gpus all --shm-size=8g paddleocr-pdf:gpu nvidia-smi
+```
+
+> **原理说明**：`paddlepaddle-gpu v3.2.2` 依赖以下 pip 包提供 CUDA 12 运行时：
+> - `nvidia-cuda-runtime-cu12` — CUDA 运行时 API
+> - `nvidia-cublas-cu12` — CUDA BLAS 线性代数库
+> - `nvidia-cudnn-cu12` — cuDNN 深度神经网络库
+>
+> 这些包作为 shared library wheels 在容器中安装 `.so` 文件，通过 `--gpus all`
+> 挂载宿主机的 NVIDIA 驱动，因此 `python:3.11-slim` 基础镜像即可支持 GPU。
 
 **环境变量说明**：
 - `LOG_LEVEL`：日志级别，可选值：debug, info, warning, error, critical
@@ -216,6 +267,8 @@ docker image prune
 
 ### 8.1 使用Docker Compose
 
+#### CPU 版本
+
 创建`docker-compose.yml`文件：
 
 ```yaml
@@ -239,6 +292,47 @@ services:
 
 运行：
 ```bash
+docker-compose up -d
+```
+
+#### GPU 版本
+
+如需 GPU 加速，使用以下 compose 配置：
+
+```yaml
+version: '3.8'
+
+services:
+  paddleocr-pdf:
+    build:
+      context: .
+      args:
+        PADDLE_PACKAGE: paddlepaddle-gpu
+    image: paddleocr-pdf:gpu
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/.paddlex
+      - ./output:/app/output
+      - ./logs:/app/logs
+    environment:
+      - LOG_LEVEL=info
+      - PORT=8000
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    shm_size: 8g
+    restart: unless-stopped
+    user: "1000:1000"
+```
+
+运行：
+```bash
+docker-compose build
 docker-compose up -d
 ```
 
@@ -311,6 +405,30 @@ docker run -d -p 8000:8000 --memory=4g --memory-swap=4g paddleocr-pdf
 ```bash
 # 启用模型源检查禁用
 docker run -d -p 8000:8000 -e DISABLE_MODEL_SOURCE_CHECK=True paddleocr-pdf
+```
+
+### 9.5 GPU 无法使用 / 自动降级为 CPU
+
+**问题**：容器运行日志显示 `paddlepaddle-gpu` 未使用 GPU，降级为 CPU
+
+**可能原因与排查步骤**：
+
+| 原因 | 检查方法 | 解决方案 |
+|------|---------|---------|
+| 运行时缺少 `--gpus all` | `docker inspect <容器名> \| jq '.[].HostConfig.DeviceRequests'` 为空 | 停止容器，重新加 `--gpus all` 运行 |
+| 共享内存不足 (shm-size) | 容器内运行 `df -h /dev/shm`，通常应 ≥ 8G | 加 `--shm-size=8g` |
+| NVIDIA Container Toolkit 未安装 | `docker run --rm --gpus all nvidia/cuda:12.2.0-runtime-ubuntu22.04 nvidia-smi` 失败 | Linux: `sudo apt install nvidia-container-toolkit && sudo systemctl restart docker`<br>Windows WSL2: 确认 WSL2 内核支持、Docker Desktop 已启用 WSL2 后端 |
+| GPU 镜像用 CPU 参数运行 | `docker run` 未指定 `paddleocr-pdf:gpu` 镜像 | 构建时 `-t paddleocr-pdf:gpu`，运行时指定该 tag |
+| 主机驱动版本过旧 | `nvidia-smi` 显示的驱动版本 < 525.60.13 | 升级 NVIDIA 驱动 |
+| Docker Desktop WSL2 GPU 未启用 | Docker Desktop → Settings → Resources → WSL Integration → 确保 "Enable NVIDIA CUDA" 已勾选 | 启用后重启 Docker Desktop |
+
+**快速诊断命令**：
+```bash
+# 验证 GPU 是否被容器识别
+docker run --rm --gpus all --shm-size=8g paddleocr-pdf:gpu nvidia-smi
+
+# 查看 paddle 设备信息
+docker run --rm --gpus all --shm-size=8g paddleocr-pdf:gpu python -c "import paddle; print('GPU可用:', paddle.is_compiled_with_cuda()); print('设备数:', len(paddle.get_cuda_rng_state()) if paddle.is_compiled_with_cuda() else 0)"
 ```
 
 ## 10. 最佳实践
