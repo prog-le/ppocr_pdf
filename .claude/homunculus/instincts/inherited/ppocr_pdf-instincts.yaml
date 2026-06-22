@@ -1,0 +1,702 @@
+# Instincts generated from https://github.com/prog-le/ppocr_pdf
+# Generated: 2026-06-22T04:29:34.303Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: ppocr_pdf-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: fix, chore, docs, feat, test
+
+## Evidence
+
+- 29 commits analyzed
+- Detected conventional commit pattern
+- Examples: fix: set FLAGS_enable_pir_api=0 before any paddle import to fix PIR executor crash, feat: add PP-OCRv6 support with lang and model_size parameters
+
+---
+id: ppocr_pdf-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Commit Length
+
+## Action
+
+Write moderate-length commit messages (~64 characters)
+
+## Evidence
+
+- Average commit message length: 64 chars
+- Based on 29 commits
+
+---
+id: ppocr_pdf-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Naming Files
+
+## Action
+
+Use snake_case naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: snake_case
+
+---
+id: ppocr_pdf-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: ppocr_pdf-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: ppocr_pdf-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: ppocr_pdf-test-naming
+trigger: "when creating a test file"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Test Naming
+
+## Action
+
+Name test files using the pattern: *_test.py
+
+## Evidence
+
+- File pattern: *_test.py
+- Consistent across test files
+
+---
+id: ppocr_pdf-workflow-feature-development
+trigger: "when implementing a new feature"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Workflow Feature Development
+
+## Action
+
+Follow the feature-development workflow:
+1. Add feature implementation
+2. Add tests for feature
+3. Update documentation
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~18x per month
+- Files: **/*.test.*, **/api/**
+
+---
+id: ppocr_pdf-workflow-test-driven-development
+trigger: "when adding new functionality"
+confidence: 0.75
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Workflow Test Driven Development
+
+## Action
+
+Follow the test-driven-development workflow:
+1. Write failing test
+2. Implement code to pass test
+3. Refactor if needed
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~5x per month
+- Files: **/*.test.*, **/*.spec.*, src/**/*
+
+---
+id: ppocr_pdf-workflow-refactoring
+trigger: "when refactoring code"
+confidence: 0.7
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Workflow Refactoring
+
+## Action
+
+Follow the refactoring workflow:
+1. Ensure tests pass before refactor
+2. Refactor code structure
+3. Verify tests still pass
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~4x per month
+- Files: src/**/*
+
+---
+id: ppocr_pdf-workflow-feature-development-with-tests-and-docs
+trigger: "when doing feature development with tests and docs"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Workflow Feature Development With Tests And Docs
+
+## Action
+
+Follow the feature-development-with-tests-and-docs workflow:
+1. Update or extend core implementation files (e.g., ocr_pdf.py, api.py, download_models.py)
+2. Add or update CLI/API parameters as needed
+3. Update or add new test files to cover the new feature
+4. Update documentation files (README.md, Docker.md, or design/plans in thoughts/)
+5. Optionally, update .gitignore or requirements.txt if new outputs/dependencies are introduced
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: ocr_pdf.py, api.py, download_models.py
+
+---
+id: ppocr_pdf-workflow-bugfix-or-hotfix-across-core-logic
+trigger: "when doing bugfix or hotfix across core logic"
+confidence: 0.65
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Workflow Bugfix Or Hotfix Across Core Logic
+
+## Action
+
+Follow the bugfix-or-hotfix-across-core-logic workflow:
+1. Edit core implementation files to fix the bug (e.g., ocr_pdf.py, api.py, download_models.py, device_utils.py)
+2. Optionally update or add tests to verify the fix
+3. Optionally update documentation or add notes to design/ledger files
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~3x per month
+- Files: ocr_pdf.py, api.py, download_models.py
+
+---
+id: ppocr_pdf-workflow-design-and-implementation-planning
+trigger: "when doing design and implementation planning"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Workflow Design And Implementation Planning
+
+## Action
+
+Follow the design-and-implementation-planning workflow:
+1. Create or update design documents in thoughts/shared/designs/
+2. Create or update implementation plans in thoughts/shared/plans/
+3. Optionally, validate design with baseline tests or notes
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: thoughts/shared/designs/*.md, thoughts/shared/plans/*.md
+
+---
+id: ppocr_pdf-workflow-refactor-with-module-extraction
+trigger: "when doing refactor with module extraction"
+confidence: 0.55
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Workflow Refactor With Module Extraction
+
+## Action
+
+Follow the refactor-with-module-extraction workflow:
+1. Extract logic from an existing file (e.g., api.py) into a new module (e.g., routers/output_format.py)
+2. Update imports and references in the original and related files
+3. Add or update constants/shared utilities as needed
+4. Maintain backward compatibility with try/except or fallback logic
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~1x per month
+- Files: api.py, routers/*.py
+
+---
+id: ppocr_pdf-workflow-test-suite-update-or-migration
+trigger: "when doing test suite update or migration"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Workflow Test Suite Update Or Migration
+
+## Action
+
+Follow the test-suite-update-or-migration workflow:
+1. Update, rewrite, or remove outdated test files in tests/
+2. Add new test files for new features or models
+3. Update test fixtures or mocks to match new output structures
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: tests/*.py
+
+---
+id: ppocr_pdf-workflow-dependency-or-infrastructure-update
+trigger: "when doing dependency or infrastructure update"
+confidence: 0.55
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Workflow Dependency Or Infrastructure Update
+
+## Action
+
+Follow the dependency-or-infrastructure-update workflow:
+1. Add or update dependencies in requirements.txt
+2. Add or update configuration files (e.g., pytest.ini, .gitignore)
+3. Optionally, update documentation to reflect the new dependency or config
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~1x per month
+- Files: requirements.txt, pytest.ini, .gitignore
+
+---
+id: ppocr_pdf-instinct-file-naming-snake-case
+trigger: "When creating or renaming a file."
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Instinct File Naming Snake Case
+
+## Action
+
+Use snake_case for file names.
+
+## Evidence
+
+- Pattern in namingConventions.files: snake_case
+- All core files (e.g., ocr_pdf.py, download_models.py) use snake_case.
+
+---
+id: ppocr_pdf-instinct-function-naming-camelCase
+trigger: "When defining a function."
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Instinct Function Naming CamelCase
+
+## Action
+
+Use camelCase for function names.
+
+## Evidence
+
+- Pattern in namingConventions.functions: camelCase
+
+---
+id: ppocr_pdf-instinct-class-naming-pascal-case
+trigger: "When defining a class."
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Instinct Class Naming Pascal Case
+
+## Action
+
+Use PascalCase for class names.
+
+## Evidence
+
+- Pattern in namingConventions.classes: PascalCase
+
+---
+id: ppocr_pdf-instinct-constant-naming-screaming-snake-case
+trigger: "When defining a constant."
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Instinct Constant Naming Screaming Snake Case
+
+## Action
+
+Use SCREAMING_SNAKE_CASE for constants.
+
+## Evidence
+
+- Pattern in namingConventions.constants: SCREAMING_SNAKE_CASE
+
+---
+id: ppocr_pdf-instinct-import-style-relative
+trigger: "When importing modules within the package."
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Instinct Import Style Relative
+
+## Action
+
+Use relative imports.
+
+## Evidence
+
+- Pattern in importStyle: relative
+
+---
+id: ppocr_pdf-instinct-export-style-named
+trigger: "When exporting functions or classes."
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Instinct Export Style Named
+
+## Action
+
+Use named exports.
+
+## Evidence
+
+- Pattern in exportStyle: named
+
+---
+id: ppocr_pdf-instinct-test-file-pattern
+trigger: "When creating or updating test files."
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Instinct Test File Pattern
+
+## Action
+
+Name test files with the pattern *_test.py.
+
+## Evidence
+
+- Pattern in testing.filePattern: *_test.py
+- Examples: tests/download_models_v6_test.py
+
+---
+id: ppocr_pdf-instinct-test-location-separate
+trigger: "When adding or organizing tests."
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Instinct Test Location Separate
+
+## Action
+
+Place test files in the separate tests/ folder.
+
+## Evidence
+
+- Pattern in architecture.folderStructure.testLocation: separate
+- All test files reside in tests/
+
+---
+id: ppocr_pdf-instinct-test-type-unit
+trigger: "When writing tests."
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Instinct Test Type Unit
+
+## Action
+
+Write unit tests.
+
+## Evidence
+
+- Pattern in testing.testTypes: unit
+
+---
+id: ppocr_pdf-instinct-git-commit-conventional
+trigger: "When making a commit."
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Instinct Git Commit Conventional
+
+## Action
+
+Use conventional commit prefixes: fix, feat, chore, docs, test, refactor.
+
+## Evidence
+
+- Pattern in commits.prefixes
+- Examples: fix: set FLAGS_enable_pir_api=0...
+- feat: add PP-OCRv6 support...
+
+---
+id: ppocr_pdf-instinct-git-commit-length
+trigger: "When writing a commit message."
+confidence: 0.7
+domain: git
+source: repo-analysis
+source_repo: prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Instinct Git Commit Length
+
+## Action
+
+Keep commit messages concise (~64 characters on average).
+
+## Evidence
+
+- Pattern in commits.averageLength: 64
+
+---
+id: ppocr_pdf-instinct-feature-development-with-tests-and-docs
+trigger: "When adding a significant new feature or capability."
+confidence: 0.95
+domain: workflow
+source: repo-analysis
+source_repo: prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Instinct Feature Development With Tests And Docs
+
+## Action
+
+Update core implementation files, add/update CLI/API parameters, update/add tests, update documentation, and optionally update dependencies/configs.
+
+## Evidence
+
+- Workflow: feature-development-with-tests-and-docs
+- Commits: feat: add PP-OCRv6 support with lang and model_size parameters
+- Files: ocr_pdf.py, api.py, download_models.py, tests/*.py, README.md
+
+---
+id: ppocr_pdf-instinct-bugfix-or-hotfix-across-core-logic
+trigger: "When fixing a bug or regression in core functionality."
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Instinct Bugfix Or Hotfix Across Core Logic
+
+## Action
+
+Edit core implementation files to fix the bug, optionally update/add tests, and optionally update documentation or design notes.
+
+## Evidence
+
+- Workflow: bugfix-or-hotfix-across-core-logic
+- Commits: fix: set FLAGS_enable_pir_api=0 before any paddle import to fix PIR executor crash
+- Files: ocr_pdf.py, api.py, download_models.py, device_utils.py, tests/*.py
+
+---
+id: ppocr_pdf-instinct-design-and-implementation-planning
+trigger: "When planning a significant refactor, feature, or architectural change."
+confidence: 0.85
+domain: workflow
+source: repo-analysis
+source_repo: prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Instinct Design And Implementation Planning
+
+## Action
+
+Create or update design documents in thoughts/shared/designs/ and implementation plans in thoughts/shared/plans/.
+
+## Evidence
+
+- Workflow: design-and-implementation-planning
+- Files: thoughts/shared/designs/*.md, thoughts/shared/plans/*.md
+
+---
+id: ppocr_pdf-instinct-refactor-with-module-extraction
+trigger: "When modularizing or cleaning up existing code."
+confidence: 0.85
+domain: workflow
+source: repo-analysis
+source_repo: prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Instinct Refactor With Module Extraction
+
+## Action
+
+Extract logic into new modules/routers, update imports/references, update shared utilities, and maintain backward compatibility.
+
+## Evidence
+
+- Workflow: refactor-with-module-extraction
+- Files: api.py, routers/*.py
+
+---
+id: ppocr_pdf-instinct-test-suite-update-or-migration
+trigger: "When core logic or supported models change."
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Instinct Test Suite Update Or Migration
+
+## Action
+
+Update, rewrite, or remove outdated test files; add new tests for features/models; update fixtures/mocks as needed.
+
+## Evidence
+
+- Workflow: test-suite-update-or-migration
+- Files: tests/*.py
+
+---
+id: ppocr_pdf-instinct-dependency-or-infrastructure-update
+trigger: "When a new dependency or infrastructure/configuration change is required."
+confidence: 0.8
+domain: workflow
+source: repo-analysis
+source_repo: prog-le/ppocr_pdf
+---
+
+# Ppocr_pdf Instinct Dependency Or Infrastructure Update
+
+## Action
+
+Add or update requirements.txt, pytest.ini, .gitignore, and optionally update documentation.
+
+## Evidence
+
+- Workflow: dependency-or-infrastructure-update
+- Files: requirements.txt, pytest.ini, .gitignore
+
