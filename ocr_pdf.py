@@ -881,72 +881,91 @@ class PDFOCRHandler:
 
     def _draw_detection(self, img, res):
         """在图像上绘制单个检测结果的标注框（含半透明位置覆盖层）"""
-        try:
-            boxes = []
-            labels = []  # 每个box对应的文字
-            colors = []  # 每个box对应的颜色
-            color = (200, 150, 50)  # default: 浅蓝/棕
-            label = ''
+        boxes = []
+        labels = []  # 每个box对应的文字
+        colors = []  # 每个box对应的颜色
+        color = (200, 150, 50)  # default: 浅蓝/棕
+        label = ''
 
-            # --- 结构模型格式 (PP-StructureV3 / PaddleOCR-VL) ---
-            if hasattr(res, 'res'):
-                for item in res.res:
-                    if isinstance(item, dict) and 'bbox' in item:
-                        bbox = item['bbox']  # [x1, y1, x2, y2]
-                        x1, y1, x2, y2 = map(int, bbox[:4])
+        # --- 结构模型格式 (PP-StructureV3 / PaddleOCR-VL) ---
+        if hasattr(res, 'res'):
+            for item in res.res:
+                if isinstance(item, dict) and 'bbox' in item:
+                    bbox = item['bbox']  # [x1, y1, x2, y2]
+                    # PP-StructureV3 的 bbox 可能是 [x1,y1,x2,y2] 或 [[x1,y1],[x2,y2],...]
+                    if (isinstance(bbox, (list, tuple)) and len(bbox) >= 4
+                            and all(isinstance(v, (int, float)) for v in bbox[:4])):
+                        # [x1, y1, x2, y2] 格式
+                        x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
                         box_pts = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
-                        item_type = item.get('type', 'text')
-                        color = {
-                            'text': (255, 0, 0),      # 蓝
-                            'title': (0, 0, 255),     # 红
-                            'table': (0, 255, 0),     # 绿
-                            'figure': (0, 165, 255),  # 橙
-                            'formula': (128, 0, 128), # 紫
-                            'header': (255, 255, 0),  # 青
-                            'footer': (255, 255, 0),  # 青
-                        }.get(item_type, (200, 150, 50))
-                        label = str(item.get('text', ''))
-                        boxes.append(box_pts)
-                        colors.append(color)
-                        labels.append(label)
-
-            # --- pp-ocrv5 格式: [box_coords, (text, conf)] ---
-            elif isinstance(res, (list, tuple)) and len(res) >= 2:
-                box_coords = res[0]
-                text_info = res[1]
-                if (isinstance(box_coords, (list, tuple)) and len(box_coords) == 4
-                        and all(isinstance(pt, (list, tuple)) and len(pt) == 2 for pt in box_coords)):
-                    boxes.append(box_coords)
-                    colors.append((255, 0, 0))  # 蓝 = text
-                    if isinstance(text_info, (list, tuple)) and len(text_info) > 0:
-                        labels.append(str(text_info[0]))
+                    elif (isinstance(bbox, (list, tuple)) and len(bbox) == 4
+                          and all(isinstance(pt, (list, tuple)) and len(pt) >= 2 for pt in bbox)):
+                        # [[x1,y1],[x2,y2],[x3,y3],[x4,y4]] 格式
+                        box_pts = [[int(p[0]), int(p[1])] for p in bbox[:4]]
                     else:
-                        labels.append('')
+                        continue
+                    item_type = item.get('type', 'text')
+                    color = {
+                        'text': (255, 0, 0),      # 蓝
+                        'title': (0, 0, 255),     # 红
+                        'table': (0, 255, 0),     # 绿
+                        'figure': (0, 165, 255),  # 橙
+                        'formula': (128, 0, 128), # 紫
+                        'header': (255, 255, 0),  # 青
+                        'footer': (255, 255, 0),  # 青
+                    }.get(item_type, (200, 150, 50))
+                    label = str(item.get('text', ''))
+                    boxes.append(box_pts)
+                    colors.append(color)
+                    labels.append(label)
 
-            # 绘制所有框（半透明填充 + 轮廓 + 文字标签）
-            overlay = None
-            for box, box_color, box_label in zip(boxes, colors, labels):
-                pts = np.array(box, dtype=np.int32).reshape((-1, 1, 2))
-                # 半透明覆盖层（首次使用时创建）
-                if overlay is None:
-                    overlay = np.zeros_like(img)
-                cv2.fillPoly(overlay, [pts], box_color)
-                # 轮廓线（直接画在 img 上，保持清晰）
-                cv2.polylines(img, [pts], isClosed=True, color=box_color, thickness=2)
-                if box_label:
-                    # 文字标签背景 + 文字
-                    text_x, text_y = box[0]
-                    (tw, th), _ = cv2.getTextSize(box_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-                    cv2.rectangle(img, (text_x, text_y - th - 4),
-                                  (text_x + tw, text_y), box_color, -1)
-                    cv2.putText(img, box_label, (text_x, text_y - 2),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        # --- pp-ocrv5 格式: [box_coords, (text, conf)] ---
+        elif isinstance(res, (list, tuple)) and len(res) >= 2:
+            box_coords = res[0]
+            text_info = res[1]
+            if (isinstance(box_coords, (list, tuple)) and len(box_coords) == 4
+                    and all(isinstance(pt, (list, tuple)) and len(pt) == 2 for pt in box_coords)):
+                boxes.append(box_coords)
+                colors.append((255, 0, 0))  # 蓝 = text
+                if isinstance(text_info, (list, tuple)) and len(text_info) > 0:
+                    labels.append(str(text_info[0]))
+                else:
+                    labels.append('')
+
+        # 绘制所有框（半透明填充 + 轮廓 + 文字标签）
+        overlay = None
+        for box, box_color, box_label in zip(boxes, colors, labels):
+            pts = np.array(box, dtype=np.int32).reshape((-1, 1, 2))
+            # 半透明覆盖层（首次使用时创建）
+            if overlay is None:
+                overlay = np.zeros_like(img)
+            cv2.fillPoly(overlay, [pts], box_color)
+            # 轮廓线（直接画在 img 上，保持清晰）
+            cv2.polylines(img, [pts], isClosed=True, color=box_color, thickness=2)
+            if box_label:
+                # 文字标签背景 + 文字
+                text_x, text_y = box[0]
+                (tw, th), _ = cv2.getTextSize(box_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                cv2.rectangle(img, (text_x, text_y - th - 4),
+                              (text_x + tw, text_y), box_color, -1)
+                cv2.putText(img, box_label, (text_x, text_y - 2),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
             # 将半透明覆盖层与原始图像混合（使检测区域有明显颜色蒙版）
             if overlay is not None:
                 cv2.addWeighted(overlay, 0.40, img, 0.60, 0, img)
-        except Exception:
-            pass  # 单条检测绘制失败不影响整体
+                logger.info("_draw_detection: 绘制了 %d 个半透明覆盖框", len(boxes))
+            elif boxes:
+                logger.warning("_draw_detection: 有 %d 个框但 overlay 未创建", len(boxes))
+            else:
+                logger.warning("_draw_detection: 未识别到任何检测框 (res 类型: %s, hasattr res: %s)",
+                              type(res).__name__, hasattr(res, 'res'))
+
+            # === 诊断: 无论如何在第1页画一个明显的测试色块，确认渲染管线正常 ===
+            h, w = img.shape[:2]
+            cv2.rectangle(img, (w - 120, 0), (w - 1, 40), (0, 0, 255), -1)  # 右上角红色条
+            cv2.putText(img, "OVERLAY OK", (w - 115, 28),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
 class PDFFileHandler(FileSystemEventHandler):
     """监控目录中的新PDF文件（同步处理）"""
