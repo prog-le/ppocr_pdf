@@ -45,6 +45,7 @@ import time
 import argparse
 import logging
 import sys
+import re
 from PyPDF2 import PdfReader, PdfWriter
 
 # PP-ChatOCRv4 运行时补丁：修复 LLM JSON 数组/裸字符串解析 + 注入 few-shot 示例
@@ -132,6 +133,7 @@ import cv2
 import numpy as np
 from paddleocr import PaddleOCR, PPStructureV3, PaddleOCRVL
 from device_utils import detect_device, verify_paddle_device
+from tqdm import tqdm
 
 class PDFOCRHandler:
     def __init__(self, output_dir, model='pp-ocrv6', device='auto',
@@ -373,9 +375,8 @@ class PDFOCRHandler:
             ocr_results = []
             page_raw_results = []
             
-            # 逐页处理
-            for page_num in range(total_pages):
-                logger.info(f"处理第 {page_num + 1}/{total_pages} 页")
+            # 逐页处理（带进度条）
+            for page_num in tqdm(range(total_pages), desc=f"OCR {filename}", unit="页", leave=False):
                 
                 try:
                     # 获取页面
@@ -715,6 +716,11 @@ class PDFOCRHandler:
                 if os.path.exists(pdf_path):
                     logger.info(f"layout.pdf 已生成: {pdf_path}")
                 
+                # 3) output.json — 结构化 JSON 输出（如果启用）
+                if 'json' in self.output_formats:
+                    json_path = os.path.join(pdf_output_dir, "output.json")
+                    self._build_json(ocr_results, json_path, total_pages, filename)
+                
                 logger.info(f"PDF 文件处理完成: {pdf_output_dir}")
                 success = True
                 return True
@@ -792,6 +798,38 @@ class PDFOCRHandler:
         with open(md_path, 'w', encoding='utf-8') as f:
             f.write('\n'.join(lines))
 
+    def _build_json(self, ocr_results, json_path, total_pages, filename):
+        """构建 output.json：包含文件名、总页数、每页识别文本"""
+        import json
+        pages = []
+        current_page = 0
+        current_lines = []
+        for line in ocr_results:
+            sep_match = re.match(r'^=== 第 (\d+) 页 ===$', line)
+            if sep_match:
+                if current_page > 0:
+                    pages.append({
+                        "page_num": current_page,
+                        "text": "\n".join(current_lines)
+                    })
+                current_page = int(sep_match.group(1))
+                current_lines = []
+            else:
+                current_lines.append(line)
+        if current_lines:
+            pages.append({
+                "page_num": current_page,
+                "text": "\n".join(current_lines)
+            })
+        output = {
+            "filename": filename,
+            "total_pages": total_pages,
+            "pages": pages
+        }
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(output, f, ensure_ascii=False, indent=2)
+        logger.info("JSON 输出已保存: %s", json_path)
+
     def _create_layout_pdf(self, images_dir, page_raw_results, pdf_path, total_pages):
         """创建带彩色标注框的 layout.pdf（MinerU 风格）
         
@@ -842,11 +880,13 @@ class PDFOCRHandler:
                 logger.error(f"生成 layout.pdf 失败: {e}")
 
     def _draw_detection(self, img, res):
-        """在图像上绘制单个检测结果的标注框"""
+        """在图像上绘制单个检测结果的标注框（含半透明位置覆盖层）"""
         try:
             boxes = []
-            label = None
+            labels = []  # 每个box对应的文字
+            colors = []  # 每个box对应的颜色
             color = (200, 150, 50)  # default: 浅蓝/棕
+            label = ''
 
             # --- 结构模型格式 (PP-StructureV3 / PaddleOCR-VL) ---
             if hasattr(res, 'res'):
@@ -855,7 +895,6 @@ class PDFOCRHandler:
                         bbox = item['bbox']  # [x1, y1, x2, y2]
                         x1, y1, x2, y2 = map(int, bbox[:4])
                         box_pts = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
-                        boxes.append(box_pts)
                         item_type = item.get('type', 'text')
                         color = {
                             'text': (255, 0, 0),      # 蓝
@@ -867,6 +906,9 @@ class PDFOCRHandler:
                             'footer': (255, 255, 0),  # 青
                         }.get(item_type, (200, 150, 50))
                         label = str(item.get('text', ''))
+                        boxes.append(box_pts)
+                        colors.append(color)
+                        labels.append(label)
 
             # --- pp-ocrv5 格式: [box_coords, (text, conf)] ---
             elif isinstance(res, (list, tuple)) and len(res) >= 2:
@@ -875,22 +917,34 @@ class PDFOCRHandler:
                 if (isinstance(box_coords, (list, tuple)) and len(box_coords) == 4
                         and all(isinstance(pt, (list, tuple)) and len(pt) == 2 for pt in box_coords)):
                     boxes.append(box_coords)
-                    color = (255, 0, 0)  # 蓝 = text
+                    colors.append((255, 0, 0))  # 蓝 = text
                     if isinstance(text_info, (list, tuple)) and len(text_info) > 0:
-                        label = str(text_info[0])
+                        labels.append(str(text_info[0]))
+                    else:
+                        labels.append('')
 
-            # 绘制所有框
-            for box in boxes:
+            # 绘制所有框（半透明填充 + 轮廓 + 文字标签）
+            overlay = None
+            for box, box_color, box_label in zip(boxes, colors, labels):
                 pts = np.array(box, dtype=np.int32).reshape((-1, 1, 2))
-                cv2.polylines(img, [pts], isClosed=True, color=color, thickness=2)
-                if label:
-                    # 半透明背景 + 文字
+                # 半透明覆盖层（首次使用时创建）
+                if overlay is None:
+                    overlay = np.zeros_like(img)
+                cv2.fillPoly(overlay, [pts], box_color)
+                # 轮廓线（直接画在 img 上，保持清晰）
+                cv2.polylines(img, [pts], isClosed=True, color=box_color, thickness=2)
+                if box_label:
+                    # 文字标签背景 + 文字
                     text_x, text_y = box[0]
-                    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                    (tw, th), _ = cv2.getTextSize(box_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
                     cv2.rectangle(img, (text_x, text_y - th - 4),
-                                  (text_x + tw, text_y), color, -1)
-                    cv2.putText(img, label, (text_x, text_y - 2),
+                                  (text_x + tw, text_y), box_color, -1)
+                    cv2.putText(img, box_label, (text_x, text_y - 2),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+            # 将半透明覆盖层与原始图像混合（使检测区域有明显颜色蒙版）
+            if overlay is not None:
+                cv2.addWeighted(overlay, 0.40, img, 0.60, 0, img)
         except Exception:
             pass  # 单条检测绘制失败不影响整体
 
@@ -981,13 +1035,12 @@ def run_manual_mode(input_dir, output_dir, model='pp-ocrv6', device='auto', lang
         grayscale=grayscale
     )
 
-    # 同步处理所有PDF文件
+    # 同步处理所有PDF文件（带进度条）
     success_count = 0
     failed_count = 0
     
-    for pdf_file in pdf_files:
+    for pdf_file in tqdm(pdf_files, desc=f"批量处理 {os.path.basename(input_dir)}", unit="file"):
         pdf_path = os.path.join(input_dir, pdf_file)
-        logger.info(f"开始处理文件: {pdf_file}")
         
         try:
             result = ocr_handler.process_pdf(pdf_path)
