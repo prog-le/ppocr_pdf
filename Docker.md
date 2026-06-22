@@ -24,8 +24,8 @@
   - 严格的依赖管理
 - **预配置**：
   - 包含所有必要的系统和Python依赖
-  - 预下载默认模型
   - 配置了合理的环境变量
+  - 支持通过 `ARG PADDLE_PACKAGE` 切换 CPU/GPU 版本
 - **易用性**：
   - 一键构建和运行
   - 支持持久化卷挂载
@@ -48,13 +48,19 @@ cd ppocr_pdf
 
 ### 4.2 构建Docker镜像
 
-#### 4.2.1 构建默认架构镜像
+#### 4.2.1 构建 CPU 版本（默认）
 
 ```bash
 docker build -t paddleocr-pdf .
 ```
 
-#### 4.2.2 构建特定架构镜像
+#### 4.2.2 构建 GPU 版本
+
+```bash
+docker build --build-arg PADDLE_PACKAGE=paddlepaddle-gpu -t paddleocr-pdf:gpu .
+```
+
+#### 4.2.3 构建特定架构镜像
 
 ```bash
 # 构建x86-64架构镜像
@@ -104,6 +110,8 @@ docker run -d -p 8000:8000 \
 - `LOG_LEVEL`：日志级别，可选值：debug, info, warning, error, critical
 - `PORT`：API服务端口，默认：8000
 - `DISABLE_MODEL_SOURCE_CHECK`：是否禁用模型源检查，默认：True
+- `FLAGS_enable_pir_api`：是否启用 PIR 执行器，默认：0（禁用，防止PIR段错误崩溃）
+- `PADDLEX_HOME`：PaddleX 模型缓存目录，默认：/app/.paddlex
 - `PYTHONUNBUFFERED`：是否启用Python无缓冲输出，默认：1
 
 ## 5. 访问服务
