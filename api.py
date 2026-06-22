@@ -17,6 +17,7 @@ os.makedirs(API_OUTPUT_BASE, exist_ok=True)
 
 # 必须在 paddle 加载前设置，否则 PIR 执行器 bug (ConvertPirAttribute2RuntimeAttribute) 会造成页面崩溃
 os.environ.setdefault("FLAGS_enable_pir_api", "0")
+os.environ.setdefault("PADDLEX_HOME", os.path.join(os.getcwd(), ".paddlex"))
 
 import tempfile
 import logging

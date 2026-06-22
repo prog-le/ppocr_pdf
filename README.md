@@ -2,32 +2,30 @@
 
 ## 项目概述
 
-这是一个基于Python 3.11和PaddleOCR的PDF文字识别项目，能够对指定输入目录中的PDF文件执行文字识别操作，并将识别结果保存至指定的输出文件夹。项目支持两种工作模式：手动模式和守护模式，满足不同场景的使用需求。
+这是一个基于Python 3.11和PaddleOCR的PDF文字识别项目，能够对指定输入目录中的PDF文件执行高精度文字识别，并将识别结果以多种格式（纯文本、JSON、Markdown、标注图片、标注PDF）保存。项目支持手动模式和守护模式，满足不同场景的使用需求。
 
 ## 功能特性
 
 ### 🎯 核心功能
 
-- **PDF文字识别**：使用PaddleOCR库对PDF文件进行高精度文字识别，支持中英文
-- **批量处理**：支持对目录中的多个PDF文件进行批量处理
+- **PDF文字识别**：使用PaddleOCR引擎进行高精度文字识别，支持中文、英文、日文、韩文等50+语言
+- **多种输出格式**：支持纯文本 / JSON结构化数据 / Markdown文档 / 标注图片 / 标注PDF，可按需选择
+- **三种OCR引擎**：PaddleOCR-VL（多模态）、PP-OCRv6（通用、三级尺寸可选）、PP-StructureV3（保留文档结构）
+- **智能设备检测**：自动检测CUDA GPU可用性，支持 `auto` / `gpu` / `cpu` 三种模式
 - **两种工作模式**：
-  - **手动模式**：对当前输入目录中已存在的PDF文件执行一次性识别操作
-  - **守护模式**：持续监控指定输入目录，当检测到新的PDF文件被添加时自动触发识别流程
-- **多模型支持**：提供四种PaddleOCR模型供选择，满足不同场景需求
-- **结果保存**：将识别结果按页面组织保存为文本文件，便于后续查看和处理
-- **日志记录**：自动记录识别过程的详细信息，包括日期时间、文件名、文件大小、处理耗时、处理结果等
-- **PDF优化**：支持PDF文件优化，可配置不同优化级别，提高处理效率
-- **灰度渲染**：支持灰度渲染选项，减少内存占用，提升处理速度
+  - **手动模式**：对当前输入目录中的PDF文件执行一次性批量识别
+  - **守护模式**：持续监控输入目录，检测到新PDF文件时自动触发识别
+- **PDF预处理**：支持PDF优化（三级）和灰度渲染，减少内存占用，提升处理速度
+- **日志记录**：自动记录识别过程，包括文件大小、处理耗时、结果状态等
 
 ### ✨ 技术特点
 
-- **高效识别**：基于PaddleOCR深度学习框架，识别准确率高
-- **命令行操作**：支持通过命令行参数灵活配置和运行
-- **自动监控**：守护模式下实时监控目录变化，自动处理新文件
+- **MinerU风格输出目录**：`{filename}/images/page_N.jpg` + `output.md` + `layout.pdf` 结构化管理
+- **检测框可视化**：layout.pdf 含半透明检测框 + 中文标签覆盖，用于校对和存档
+- **设备自动检测**：通过 `device_utils.py` 检测CUDA版本、GPU型号，智能选择最佳设备
+- **命令行 + REST API**：既支持CLI批量处理，也提供FastAPI服务供外部调用
 - **跨平台**：支持Windows、Linux和macOS操作系统
-- **易于扩展**：模块化设计，便于功能扩展和定制
-- **智能缓存**：自动管理模型文件缓存，避免重复下载
-- **Markdown日志**：将识别结果以表格形式记录到Markdown文件，便于统计和分析
+- **智能模型缓存**：自动将模型文件下载到项目本地目录，避免重复下载和权限问题
 
 ## 安装指南
 
@@ -155,11 +153,13 @@
 
 ### 模型下载脚本
 
-项目提供了`download_models.py`脚本，用于手动下载PaddleOCR模型到指定目录。
+项目提供了`download_models.py`脚本，用于手动下载PaddleOCR模型到项目本地目录。
 
 #### 脚本功能
 
-- 支持下载三种PaddleOCR模型：`pp-ocrv5`、`pp-structurev3`、`paddleocr-vl`
+- 支持下载三种OCR模型：`pp-ocrv6`、`pp-structurev3`、`paddleocr-vl`
+- 支持 `--lang` 和 `--model-size` 参数，预配置PP-OCRv6的语言和尺寸
+- 支持输出格式 `--output-formats`，配合API使用时预下载所有格式所需模型
 - 可指定模型保存目录，方便模型管理
 - 自动创建必要的目录结构
 - 提供依赖检查，明确提示缺少的依赖
@@ -171,40 +171,52 @@
 python download_models.py
 
 # 下载指定模型到自定义目录
-python download_models.py -m pp-ocrv5,paddleocr-vl -o ./models
+python download_models.py -m pp-ocrv6,paddleocr-vl -o ./models
 
 # 下载单个模型
-python download_models.py -m pp-ocrv5
+python download_models.py -m pp-ocrv6
+
+# 下载PP-OCRv6时指定语言和模型尺寸
+python download_models.py -m pp-ocrv6 --lang en --model-size small
 ```
 
 #### 参数说明
 
-- `-m, --models`: 要下载的模型，多个模型用逗号分隔，可选值: `pp-ocrv5, pp-structurev3, paddleocr-vl, all` (下载所有模型)，默认: `all`
-- `-o, --output`: 模型保存目录，默认保存到.paddlex目录
+- `-m, --models`: 要下载的模型，多个模型用逗号分隔，可选值: `pp-ocrv6, pp-structurev3, paddleocr-vl, all` (下载所有模型)，默认: `all`
+- `-o, --output`: 模型保存目录，默认保存到 `.paddlex` 目录
+- `--lang`: 语言（仅pp-ocrv6），可选值: `ch, chinese_cht, en, japan, korean, latin`，默认: `ch`
+- `--model-size`: 模型尺寸（仅pp-ocrv6），可选值: `medium, small, tiny`，默认: `medium`
 
 #### 注意事项
 
 - **pp-structurev3模型**需要安装额外依赖：`pip install "paddlex[ocr]"`
 - 脚本会自动检查pp-structurev3所需的依赖，并给出明确的安装提示
 
-### 命令行参数
+### 命令行参数（ocr_pdf.py）
 
 ```bash
-python ocr_pdf.py [-h] -i INPUT -o OUTPUT [-m {manual,daemon}] [-model {paddleocr-vl,pp-ocrv6,pp-ocrv5,pp-structurev3,pp-chatocrv4}] [-l {debug,info,warning,error,critical}] [--optimize-pdf] [--optimize-level {low,medium,high}] [--grayscale] [-of OUTPUT_FORMATS]
-```
+python ocr_pdf.py -i INPUT -o OUTPUT [options]
 
-参数说明：
-
-- `-i, --input`: 输入目录路径（必填）
-- `-o, --output`: 输出目录路径（必填）
-- `-m, --mode`: 工作模式，可选值：manual（手动模式）或 daemon（守护模式），默认：manual
-- `-model, --model`: OCR模型选择，可选值：paddleocr-vl、pp-ocrv5、pp-structurev3、pp-chatocrv4，默认：pp-ocrv5
-- `-l, --log-level`: 日志输出级别，可选值：debug、info、warning、error、critical，默认：info
-- `--optimize-pdf`: 是否优化PDF文件，默认：False
-- `--optimize-level`: PDF优化级别，可选值：low、medium、high，默认：medium
-- `--grayscale`: 是否使用灰度渲染，减少内存占用，默认：False
-- `-of, --output-formats`: 输出格式 (逗号分隔)，可选值：markdown、json、img、pdf，默认：markdown,json,img,pdf
-- `-h, --help`: 显示帮助信息
+options:
+  -i, --input INPUT          输入文件或目录路径（必填）
+  -o, --output OUTPUT        输出目录路径（必填）
+  -m, --mode {manual,daemon} 工作模式：manual / daemon（默认：manual）
+  -model, --model {paddleocr-vl,pp-ocrv6,pp-structurev3}
+                              OCR模型选择（默认：pp-ocrv6）
+  --lang {ch,en,japan,korean,latin}
+                              语言（pp-ocrv6，默认：ch）
+  --model-size {medium,small,tiny}
+                              PP-OCRv6模型尺寸（默认：medium）
+  -l, --log-level {debug,info,warning,error,critical}
+                              日志级别（默认：info）
+  --optimize-pdf              启用PDF预处理优化
+  --optimize-level {low,medium,high}
+                              PDF优化级别（默认：medium）
+  --grayscale                 启用灰度渲染（减少内存占用）
+  --device {auto,gpu,cpu}     设备选择：auto自动检测 / gpu强制GPU / cpu强制CPU（默认：auto）
+  -of, --output-formats FORMATS
+                              输出格式，逗号分隔：markdown,json,img,pdf（默认：全部）
+  -h, --help                  显示帮助信息
 
 ### 模型选择说明
 
@@ -491,7 +503,7 @@ paddleocr-pdf/
 
 ```python
 class PDFOCRHandler:
-    def __init__(self, output_dir, model='pp-ocrv5'):
+    def __init__(self, output_dir, model='pp-ocrv6'):
         self.output_dir = output_dir
         self.model = model
         
@@ -503,7 +515,7 @@ class PDFOCRHandler:
                 text_detection_model_name='PP-OCRv5_server_det',
                 text_recognition_model_name='PP-OCRv5_server_rec'
             )
-        elif model == 'pp-ocrv5':
+        elif model == 'pp-ocrv6':
             self.ocr = PaddleOCR(
                 use_textline_orientation=True,
                 lang='ch'
@@ -535,7 +547,7 @@ if height > max_size or width > max_size:
 在守护模式下，可以通过修改 `run_daemon_mode`函数中的 `sleep`时间来调整监控间隔：
 
 ```python
-def run_daemon_mode(input_dir, output_dir, model='pp-ocrv5'):
+def run_daemon_mode(input_dir, output_dir, model='pp-ocrv6'):
     # ...
     try:
         while True:
@@ -558,7 +570,7 @@ OCR识别速度受多种因素影响，包括PDF文件大小、页数、图像�
 
 - 降低PDF渲染分辨率（修改 `scale`参数）
 - 使用GPU版本的PaddlePaddle
-- 选择资源消耗较低的模型（如pp-ocrv5）
+- 选择资源消耗较低的模型（如pp-ocrv6的 tiny 尺寸）
 
 ### 3. 识别准确率低
 
@@ -566,7 +578,7 @@ OCR识别速度受多种因素影响，包括PDF文件大小、页数、图像�
 
 - 提高PDF渲染分辨率（修改 `scale`参数）
 - 确保PDF文件清晰可读
-- 选择适合的模型（如paddleocr-vl适合复杂文档，pp-chatocrv4适合信息抽取）
+- 选择适合的模型（如pp-structurev3适合结构化文档，paddleocr-vl适合复杂文档）
 - 使用最新版本的PaddleOCR模型
 
 ### 4. 模型下载失败
@@ -616,6 +628,22 @@ OCR识别速度受多种因素影响，包括PDF文件大小、页数、图像�
 
 ## 更新日志
 
+### v1.0.4 (2026-06-22)
+
+- **叠加层渲染修复**：修复 layout.pdf 检测框不可见问题
+  - 删除 `try/except Exception: pass` 避免静默失败
+  - 支持 `OCRResult.json['res']` 格式（PaddleX OCRPipeline）
+  - 修复缩进bug：叠加混合代码之前在 `for box` 循环内，boxes 为空时不执行
+  - 透明度从 0.40 降至 0.10，避免遮挡原文
+- **CJK 文字标签**：中文/Unicode 标签使用 PIL 渲染，避免 OpenCV 乱码
+  - `_get_cjk_font_path()` 静态方法自动检测系统可用中文字体
+  - `_draw_text_labels()` 双路径：ASCII 走 cv2（快速），Unicode 走 PIL（准确）
+  - 支持 Windows/Linux/macOS 跨平台字体搜索
+- **PADDLEX_HOME 环境变量**：统一在 ocr_pdf.py / api.py / download_models.py 入口设置 `PADDLEX_HOME=.paddlex`，避免 PaddleX 缓存文件散落
+- **缓存目录修复**：`CustomCacheModule` 增加 `official_models` 目录，`os.makedirs` 增加 `exist_ok=True`
+- **清理过期测试**：删除 6 个严重过时的测试文件（1240行），这些测试引用了已不存在的模块/函数
+- **文档全面更新**：README.md 同步 pp-ocrv6 默认模型、output-formats 参数、API 新端点、项目结构等
+
 ### v1.0.3 (2026-06-22)
 
 - 新增 `-of`/`--output-formats` CLI 参数，支持选择输出格式：markdown, json, img, pdf
@@ -624,7 +652,6 @@ OCR识别速度受多种因素影响，包括PDF文件大小、页数、图像�
 - 新增 `POST /upload` 批量上传端点
 - 提取输出格式校验逻辑到 `routers/output_format.py` 独立模块
 - `.txt` 格式始终生成，确保向后兼容
-- 新增 `tests/output_format_selector_test.py` 集成测试（9个测试用例）
 - 添加 `img2pdf` 依赖，用于标注 PDF 打包
 - 新增 `pytest.ini` 配置，定义 `integration` 测试标记
 - 更新项目文档，补充输出格式相关说明和示例

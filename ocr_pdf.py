@@ -40,6 +40,7 @@ import os
 
 # 必须在 paddle 加载前设置，否则 PIR 执行器 bug (ConvertPirAttribute2RuntimeAttribute) 会造成页面崩溃
 os.environ.setdefault("FLAGS_enable_pir_api", "0")
+os.environ.setdefault("PADDLEX_HOME", os.path.join(os.getcwd(), ".paddlex"))
 
 import time
 import argparse
@@ -96,10 +97,11 @@ class CustomCacheModule:
         # 创建目录结构
         for dir_path in [self.paddlex_dir, self.temp_dir, self.model_dir, 
                         os.path.join(self.paddlex_dir, "func_ret"), 
-                        os.path.join(self.paddlex_dir, "locks")]:
+                        os.path.join(self.paddlex_dir, "locks"),
+                        os.path.join(self.paddlex_dir, "official_models")]:
             if not os.path.exists(dir_path):
                 try:
-                    os.makedirs(dir_path)
+                    os.makedirs(dir_path, exist_ok=True)
                     logger.info(f"成功创建目录: {dir_path}")
                 except Exception as e:
                     logger.error(f"创建目录失败: {dir_path}, 错误: {e}")
@@ -945,7 +947,7 @@ class PDFOCRHandler:
                 else:
                     labels.append('')
 
-        # 绘制所有框（半透明填充 + 轮廓 + 文字标签）
+        # 绘制所有框（半透明填充 + 轮廓）
         overlay = None
         for box, box_color, box_label in zip(boxes, colors, labels):
             pts = np.array(box, dtype=np.int32).reshape((-1, 1, 2))
@@ -955,24 +957,110 @@ class PDFOCRHandler:
             cv2.fillPoly(overlay, [pts], box_color)
             # 轮廓线（直接画在 img 上，保持清晰）
             cv2.polylines(img, [pts], isClosed=True, color=box_color, thickness=2)
-            if box_label:
-                # 文字标签背景 + 文字
-                text_x, text_y = box[0]
-                (tw, th), _ = cv2.getTextSize(box_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-                cv2.rectangle(img, (text_x, text_y - th - 4),
-                              (text_x + tw, text_y), box_color, -1)
-                cv2.putText(img, box_label, (text_x, text_y - 2),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-        # --- 半透明混合 ---
+        # --- 半透明混合（alpha=0.10 浅色覆盖，避免遮挡原文） ---
         if overlay is not None:
-            cv2.addWeighted(overlay, 0.20, img, 0.80, 0, img)
+            cv2.addWeighted(overlay, 0.10, img, 0.90, 0, img)
             logger.debug("_draw_detection: 绘制了 %d 个半透明覆盖框", len(boxes))
         elif boxes:
             logger.warning("_draw_detection: 有 %d 个框但 overlay 未创建", len(boxes))
         else:
             logger.warning("_draw_detection: 未识别到任何检测框 (res 类型: %s, hasattr json: %s, hasattr res: %s)",
                           type(res).__name__, hasattr(res, 'json'), hasattr(res, 'res'))
+
+        # --- 文字标签（支持 Unicode/中文，使用 PIL 避免乱码） ---
+        self._draw_text_labels(img, boxes, colors, labels)
+
+    _CJK_FONT_CACHE = None  # 类级缓存，只搜索一次字体
+
+    @staticmethod
+    def _get_cjk_font_path():
+        """查找系统中可用的中文字体路径（结果缓存避免反复搜索）"""
+        if PDFOCRHandler._CJK_FONT_CACHE is not None:
+            return PDFOCRHandler._CJK_FONT_CACHE
+
+        # 优先使用 PaddleX 自带的字体
+        paddlex_font_dir = os.path.join(os.getcwd(), '.paddlex', 'fonts')
+        candidates = [
+            os.path.join(paddlex_font_dir, 'PingFang-SC-Regular.ttf'),
+            os.path.join(paddlex_font_dir, 'simfang.ttf'),
+            # Windows 系统字体
+            'C:/Windows/Fonts/msyh.ttc',
+            'C:/Windows/Fonts/SIMHEI.TTF',
+            'C:/Windows/Fonts/simsun.ttc',
+            # Linux/macOS 常用字体
+            '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+            '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
+            '/System/Library/Fonts/PingFang.ttc',
+            '/Library/Fonts/Arial Unicode.ttf',
+        ]
+        for path in candidates:
+            if os.path.isfile(path):
+                logger.info("找到中文字体: %s", path)
+                PDFOCRHandler._CJK_FONT_CACHE = path
+                return path
+
+        logger.warning("未找到中文字体，中文标签将显示为方框/乱码")
+        PDFOCRHandler._CJK_FONT_CACHE = False
+        return None
+
+    def _draw_text_labels(self, img, boxes, colors, labels):
+        """绘制文字标签，支持中文（Unicode）显示
+
+        纯 ASCII 标签走 OpenCV 更快，含中文的走 PIL 避免乱码。
+        """
+        has_unicode = any(l and not l.isascii() for l in labels)
+        if not has_unicode:
+            # 快速路径：全部是 ASCII，直接使用 cv2
+            for box, box_color, box_label in zip(boxes, colors, labels):
+                if not box_label:
+                    continue
+                text_x, text_y = box[0]
+                (tw, th), _ = cv2.getTextSize(box_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                cv2.rectangle(img, (text_x, text_y - th - 4),
+                              (text_x + tw, text_y), box_color, -1)
+                cv2.putText(img, box_label, (text_x, text_y - 2),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            return
+
+        # 慢速路径：含 Unicode 文字，使用 PIL 渲染
+        font_path = self._get_cjk_font_path()
+        if not font_path:
+            # 没有中文字体，退回到 cv2（虽然显示乱码，但有背景框标记位置）
+            for box, box_color, box_label in zip(boxes, colors, labels):
+                if not box_label:
+                    continue
+                text_x, text_y = box[0]
+                (tw, th), _ = cv2.getTextSize(box_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                cv2.rectangle(img, (text_x, text_y - th - 4),
+                              (text_x + tw, text_y), box_color, -1)
+            return
+
+        from PIL import Image, ImageDraw, ImageFont
+        font = ImageFont.truetype(font_path, 14)
+
+        # 批量转换：OpenCV BGR → PIL RGB
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(img_rgb)
+        draw = ImageDraw.Draw(pil_img)
+
+        for box, box_color, box_label in zip(boxes, colors, labels):
+            if not box_label:
+                continue
+            text_x, text_y = int(box[0][0]), int(box[0][1])
+            # 用 PIL 获取文本尺寸（支持中英文混排）
+            bbox = draw.textbbox((0, 0), box_label, font=font)
+            tw = bbox[2] - bbox[0]
+            th = bbox[3] - bbox[1]
+            # 背景矩形（PIL 使用 RGB）
+            pil_color = (int(box_color[2]), int(box_color[1]), int(box_color[0]))
+            draw.rectangle([(text_x, text_y - th - 4),
+                            (text_x + tw, text_y)], fill=pil_color)
+            # 白色文字
+            draw.text((text_x, text_y - th - 4), box_label, font=font, fill=(255, 255, 255))
+
+        # 批量转换回 OpenCV BGR
+        img[:] = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
 class PDFFileHandler(FileSystemEventHandler):
     """监控目录中的新PDF文件（同步处理）"""
