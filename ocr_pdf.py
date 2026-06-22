@@ -376,7 +376,7 @@ class PDFOCRHandler:
             page_raw_results = []
             
             # 逐页处理（带进度条）
-            for page_num in tqdm(range(total_pages), desc=f"OCR {filename}", unit="页", leave=False):
+            for page_num in tqdm(range(total_pages), desc=f"OCR {filename}", unit="页", leave=True):
                 
                 try:
                     # 获取页面
@@ -964,21 +964,15 @@ class PDFOCRHandler:
                 cv2.putText(img, box_label, (text_x, text_y - 2),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-        # --- 半透明混合 + 诊断日志 (OUTSIDE for 循环, 确保无条件执行) ---
+        # --- 半透明混合 ---
         if overlay is not None:
-            cv2.addWeighted(overlay, 0.40, img, 0.60, 0, img)
-            logger.info("_draw_detection: 绘制了 %d 个半透明覆盖框", len(boxes))
+            cv2.addWeighted(overlay, 0.20, img, 0.80, 0, img)
+            logger.debug("_draw_detection: 绘制了 %d 个半透明覆盖框", len(boxes))
         elif boxes:
             logger.warning("_draw_detection: 有 %d 个框但 overlay 未创建", len(boxes))
         else:
             logger.warning("_draw_detection: 未识别到任何检测框 (res 类型: %s, hasattr json: %s, hasattr res: %s)",
                           type(res).__name__, hasattr(res, 'json'), hasattr(res, 'res'))
-
-        # === 诊断: 画在每一张图上，确认渲染管线正常 ===
-        h, w = img.shape[:2]
-        cv2.rectangle(img, (w - 120, 0), (w - 1, 40), (0, 0, 255), -1)  # 右上角红色条
-        cv2.putText(img, "OVERLAY OK", (w - 115, 28),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
 class PDFFileHandler(FileSystemEventHandler):
     """监控目录中的新PDF文件（同步处理）"""
