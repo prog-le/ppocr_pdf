@@ -29,7 +29,7 @@
 
 ## 安装指南
 
-### 方式一：直接安装（推荐）
+### 直接安装
 
 #### 环境要求
 
@@ -71,83 +71,27 @@
    pip install paddleocr
    ```
 
+   > **GPU 加速（可选，CUDA 11.8+ / CUDA 12.x）：**
+   > 项目中的 `scripts/setup_env.bat` 会自动检测 CUDA 版本并安装对应的 PaddlePaddle GPU 版本（支持 CUDA 12.6 / PaddlePaddle 3.x）。
+   > 手动安装 GPU 版本：
+   > ```bash
+   > # CUDA 12.6
+   > pip install paddlepaddle-gpu -f https://www.paddlepaddle.org.cn/whl/cu126/simple
+   >
+   > # CUDA 12.4
+   > pip install paddlepaddle-gpu -f https://www.paddlepaddle.org.cn/whl/cu124/simple
+   >
+   > # CUDA 11.8
+   > pip install paddlepaddle-gpu -f https://www.paddlepaddle.org.cn/whl/cu118/simple
+   > ```
+   > 安装 GPU 版本后，程序会自动检测并使用 GPU 进行加速。
+
 5. **安装额外依赖（可选，用于PP-StructureV3）**
 
    ```bash
    # 安装PP-StructureV3所需的额外依赖
    pip install "paddlex[ocr]"
    ```
-
-### 方式二：Docker部署
-
-#### 环境要求
-
-- Docker 20.10+
-
-#### 部署步骤
-
-1. **克隆项目**
-
-   ```bash
-   git clone https://github.com/prog-le/ppocr_pdf.git
-   cd ppocr_pdf
-   ```
-
-2. **构建Docker镜像**
-
-   ```bash
-   # 构建默认架构镜像
-   docker build -t paddleocr-pdf .
-
-   # 构建x86-64架构镜像
-   docker buildx build --platform linux/amd64 -t paddleocr-pdf:amd64 --load .
-
-   # 构建多架构镜像并推送
-   docker buildx build --platform linux/amd64,linux/arm64 -t your-registry/paddleocr-pdf:latest --push .
-   ```
-
-3. **运行Docker容器**
-
-   ```bash
-   # 基本运行
-   docker run -d -p 8000:8000 --name paddleocr-pdf-container paddleocr-pdf
-
-   # 挂载持久化卷
-   docker run -d -p 8000:8000 \
-     -v ./models:/app/.paddlex \
-     -v ./output:/app/output \
-     -v ./logs:/app/logs \
-     --name paddleocr-pdf-container \
-     paddleocr-pdf
-
-   # 配置环境变量
-   docker run -d -p 8000:8000 \
-     -e LOG_LEVEL=info \
-     --name paddleocr-pdf-container \
-     paddleocr-pdf
-   ```
-
-4. **验证服务**
-
-   ```bash
-   # 检查容器状态
-   docker ps
-
-   # 查看日志
-   docker logs paddleocr-pdf-container
-
-   # 测试健康检查
-   curl http://localhost:8000/health
-   ```
-
-#### Docker镜像特点
-
-- ✅ 基于轻量级`python:3.11-slim`镜像
-- ✅ 非root用户运行，提高安全性
-- ✅ 支持多平台架构（linux/amd64, linux/arm64）
-- ✅ 包含所有必要依赖
-- ✅ 预配置环境变量
-- ✅ 使用tini作为入口点，确保容器优雅退出
 
 ## 使用说明
 
@@ -489,8 +433,6 @@ paddleocr-pdf/
 ├── logs/                    # 日志文件目录(自动生成)
 ├── .paddlex/                # 模型缓存目录(自动生成)
 ├── requirements.txt         # 依赖项列表
-├── Dockerfile               # Docker构建文件
-├── .dockerignore            # Docker忽略配置
 ├── .gitignore               # Git忽略配置
 └── README.md                # 项目说明文档
 ```
@@ -663,12 +605,7 @@ OCR识别速度受多种因素影响，包括PDF文件大小、页数、图像�
 - 优化了渲染过程，添加动态scale调整
 - 实现了更高效的内存管理和资源释放机制
 - 为API接口添加了PDF优化参数支持
-- 新增Docker部署支持，包括：
-  - 多平台镜像构建
-  - 非root用户运行
-  - 持久化卷挂载
-  - 环境变量配置
-- 更新了文档，添加了Docker部署指南和API参数说明
+- 更新了文档和API参数说明
 
 ### v1.0.1 (2026-01-16)
 
