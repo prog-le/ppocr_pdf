@@ -1,0 +1,6 @@
+interface:
+  display_name: "Ppocr Pdf"
+  short_description: "Repo-specific patterns and workflows for ppocr_pdf"
+  default_prompt: "Use the ppocr_pdf repo skill to follow existing architecture, testing, and workflow conventions."
+policy:
+  allow_implicit_invocation: true
